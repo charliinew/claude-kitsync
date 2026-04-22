@@ -6,8 +6,20 @@ set -euo pipefail
 # Resolve the root of the kitsync installation
 # Works whether called directly, via symlink, or sourced.
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KITSYNC_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Respect KITSYNC_ROOT if pre-set (e.g. by install.sh via symlink).
+# Otherwise resolve from the real script location, following symlinks portably.
+if [[ -z "${KITSYNC_ROOT:-}" ]] || [[ ! -d "${KITSYNC_ROOT}/lib" ]]; then
+  _ks_script="${BASH_SOURCE[0]}"
+  # Follow symlinks one level at a time (portable: macOS + Linux)
+  while [[ -L "$_ks_script" ]]; do
+    _ks_link="$(readlink "$_ks_script")"
+    # Handle relative symlink targets
+    [[ "$_ks_link" = /* ]] || _ks_link="$(cd "$(dirname "$_ks_script")" && pwd)/$_ks_link"
+    _ks_script="$_ks_link"
+  done
+  KITSYNC_ROOT="$(cd "$(dirname "$_ks_script")/.." && pwd)"
+  unset _ks_script _ks_link
+fi
 export KITSYNC_ROOT
 
 # ---------------------------------------------------------------------------
@@ -190,6 +202,10 @@ main() {
       ;;
     _post-pull-hook)
       _post_pull_hook
+      ;;
+    _install-wrapper)
+      # Internal: called by install.sh on re-install to ensure wrapper is active
+      install_wrapper_auto
       ;;
     -h|--help|help|"")
       _usage
