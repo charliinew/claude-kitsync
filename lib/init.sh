@@ -42,17 +42,13 @@ _generate_settings_template() {
 
   log_step "Generating settings.template.json from settings.json..."
 
-  # Escape HOME for sed pattern
-  local escaped_home
-  escaped_home="$(printf '%s' "$HOME" | sed 's|[.[\*^$/\\]|\\&|g')"
-
-  local pattern="s|${escaped_home}/\\.claude|__CLAUDE_HOME__|g"
-
-  if is_macos; then
-    sed "$pattern" "$settings_src" > "$settings_tpl"
-  else
-    sed "$pattern" "$settings_src" > "$settings_tpl"
-  fi
+  # Use anchored multi-user patterns — matches /Users/<any>/.claude (macOS)
+  # and /home/<any>/.claude (Linux), regardless of who owns the settings file.
+  # This ensures portability even if settings.json came from another machine.
+  cp "$settings_src" "$settings_tpl"
+  sed -i.bak "s|/Users/[^/]*/.claude|__CLAUDE_HOME__|g" "$settings_tpl" 2>/dev/null || true
+  sed -i.bak "s|/home/[^/]*/.claude|__CLAUDE_HOME__|g"  "$settings_tpl" 2>/dev/null || true
+  rm -f "${settings_tpl}.bak"
 
   log_success "Created settings.template.json with tokenised paths."
 }
@@ -237,7 +233,15 @@ GITIGNORE
   # Step 7: Push to remote (if configured)
   # ---------------------------------------------------------------------------
   if git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null 2>&1; then
-    if confirm "Push initial commit to remote now?"; then
+    # Auto-push if --remote was explicitly provided, or if user confirms interactively
+    local do_push=false
+    if [[ -n "$remote_url" ]]; then
+      do_push=true  # --remote was given: push without prompt
+    elif confirm "Push initial commit to remote now?"; then
+      do_push=true
+    fi
+
+    if [[ "$do_push" == true ]]; then
       log_step "Pushing to origin main..."
       git -C "$CLAUDE_HOME" push -u origin main 2>/dev/null || \
         git -C "$CLAUDE_HOME" push -u origin HEAD
