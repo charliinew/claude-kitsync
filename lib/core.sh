@@ -64,6 +64,10 @@ require_git_repo() {
 # ---------------------------------------------------------------------------
 confirm() {
   local prompt="${1:-Are you sure?}"
+  # Non-interactive context (pipe, script, no TTY) → default to No
+  if [[ ! -t 0 ]]; then
+    return 1
+  fi
   local reply
   printf "${_CLR_CYAN}[kitsync]${_CLR_RESET}  %s [y/N] " "$prompt" >&2
   read -r reply
