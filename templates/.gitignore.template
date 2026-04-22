@@ -1,0 +1,45 @@
+# claude-kitsync — allowlist strict
+# Strategy: deny all by default, explicitly allow what should be synced.
+# This prevents accidental commit of credentials or runtime data.
+*
+!*/
+
+# Config shareable
+!settings.json
+!CLAUDE.md
+
+# Répertoires synchronisés
+!agents/
+!agents/**
+!skills/
+!skills/**
+!hooks/
+!hooks/**
+!scripts/
+!scripts/**
+!rules/
+!rules/**
+
+# Méta
+!.gitignore
+!.kitsync/
+!.kitsync/**
+!settings.template.json
+
+# JAMAIS syncé (explicite) — these override the !*/ rule above
+.credentials.json
+projects/
+backups/
+cache/
+file-history/
+paste-cache/
+shell-snapshots/
+session-env/
+sessions/
+tasks/
+telemetry/
+stats-cache.json
+history.jsonl
+settings.local.json
+*.local.json
+.DS_Store
