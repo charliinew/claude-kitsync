@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+# bin/kitsync — main CLI dispatcher for claude-kitsync
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Resolve the root of the kitsync installation
+# Works whether called directly, via symlink, or sourced.
+# ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KITSYNC_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+export KITSYNC_ROOT
+
+# ---------------------------------------------------------------------------
+# Load all libraries
+# Order matters: core first (defines CLAUDE_HOME, logging), then the rest.
+# ---------------------------------------------------------------------------
+source "$KITSYNC_ROOT/lib/core.sh"
+source "$KITSYNC_ROOT/lib/paths.sh"
+source "$KITSYNC_ROOT/lib/sync.sh"
+source "$KITSYNC_ROOT/lib/wrapper.sh"
+source "$KITSYNC_ROOT/lib/init.sh"
+source "$KITSYNC_ROOT/lib/install-kit.sh"
+
+# ---------------------------------------------------------------------------
+# version
+# ---------------------------------------------------------------------------
+KITSYNC_VERSION="1.0.0"
+
+# ---------------------------------------------------------------------------
+# _usage — print help text
+# ---------------------------------------------------------------------------
+_usage() {
+  cat >&2 <<USAGE
+
+  ${_CLR_BOLD}kitsync${_CLR_RESET} — sync your Claude config across machines  (v${KITSYNC_VERSION})
+
+  ${_CLR_CYAN}USAGE${_CLR_RESET}
+    kitsync <command> [options]
+
+  ${_CLR_CYAN}COMMANDS${_CLR_RESET}
+    init [--remote <url>]     Initialise ~/.claude as a git repo + install shell wrapper
+    push [-m "message"]       Commit and push whitelisted changes to remote
+    pull [--force]            Pull latest changes from remote (skips if dirty tree)
+    status                    Show sync status (modified files, ahead/behind)
+    install <url>             Install a public kit into ~/.claude (selective merge)
+    doctor                    Diagnose the health of your kitsync setup
+    uninstall                 Remove the shell wrapper from rc files
+
+    ${_CLR_YELLOW}_post-pull-hook${_CLR_RESET}             Internal — called by shell wrapper after background pull
+
+  ${_CLR_CYAN}OPTIONS${_CLR_RESET}
+    -h, --help                Show this help
+    -v, --version             Show version
+
+  ${_CLR_CYAN}EXAMPLES${_CLR_RESET}
+    kitsync init --remote git@github.com:you/claude-config.git
+    kitsync push -m "add new agent"
+    kitsync install https://github.com/someone/claude-kit
+
+  ${_CLR_CYAN}ENVIRONMENT${_CLR_RESET}
+    CLAUDE_HOME               Override default ~/.claude directory
+    KITSYNC_TIMEOUT           Background pull timeout in seconds (default: 2)
+
+USAGE
+}
+
+# ---------------------------------------------------------------------------
+# cmd_doctor — diagnose health of the kitsync setup
+# ---------------------------------------------------------------------------
+cmd_doctor() {
+  local errors=0
+  local warnings=0
+
+  printf "\n"
+  log_info "Running kitsync doctor...\n"
+
+  # Check 1: CLAUDE_HOME exists
+  if [[ -d "$CLAUDE_HOME" ]]; then
+    log_success "[1/5] CLAUDE_HOME exists: $CLAUDE_HOME"
+  else
+    log_error "[1/5] CLAUDE_HOME missing: $CLAUDE_HOME — run: kitsync init"
+    errors=$((errors + 1))
+  fi
+
+  # Check 2: Is a git repo
+  if git -C "$CLAUDE_HOME" rev-parse --git-dir &>/dev/null 2>&1; then
+    log_success "[2/5] $CLAUDE_HOME is a git repository"
+  else
+    log_error "[2/5] Not a git repo — run: kitsync init"
+    errors=$((errors + 1))
+  fi
+
+  # Check 3: Remote configured
+  if git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null 2>&1; then
+    local remote_url
+    remote_url="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null)"
+    log_success "[3/5] Remote configured: $remote_url"
+  else
+    log_warn "[3/5] No remote configured — run: git -C \"$CLAUDE_HOME\" remote add origin <url>"
+    warnings=$((warnings + 1))
+  fi
+
+  # Check 4: .credentials.json is NOT tracked by git
+  if git -C "$CLAUDE_HOME" ls-files --error-unmatch ".credentials.json" &>/dev/null 2>&1; then
+    log_error "[4/5] CRITICAL: .credentials.json is tracked by git! Remove it immediately:"
+    log_error "      git -C \"$CLAUDE_HOME\" rm --cached .credentials.json"
+    errors=$((errors + 1))
+  else
+    log_success "[4/5] .credentials.json is NOT tracked (safe)"
+  fi
+
+  # Check 5: Shell wrapper installed
+  local wrapper_found=false
+  local zshrc="${ZDOTDIR:-$HOME}/.zshrc"
+  local bashrc="$HOME/.bashrc"
+
+  if { [[ -f "$zshrc" ]] && grep -qF "# kitsync-start" "$zshrc" 2>/dev/null; } || \
+     { [[ -f "$bashrc" ]] && grep -qF "# kitsync-start" "$bashrc" 2>/dev/null; }; then
+    wrapper_found=true
+  fi
+
+  if [[ "$wrapper_found" == "true" ]]; then
+    log_success "[5/5] Shell wrapper found in rc file(s)"
+  else
+    log_warn "[5/5] Shell wrapper not found — run: kitsync init"
+    warnings=$((warnings + 1))
+  fi
+
+  printf "\n"
+
+  if [[ $errors -gt 0 ]]; then
+    log_error "Doctor found $errors error(s) and $warnings warning(s) — action required."
+    return 1
+  elif [[ $warnings -gt 0 ]]; then
+    log_warn "Doctor found $warnings warning(s) — review recommended."
+    return 0
+  else
+    log_success "All checks passed — kitsync is healthy."
+    return 0
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# _post_pull_hook — internal hook called by shell wrapper after background pull
+# Normalises paths in settings.json.
+# ---------------------------------------------------------------------------
+_post_pull_hook() {
+  normalize_paths 2>/dev/null || true
+  paths_detokenize 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
+# Main dispatcher
+# ---------------------------------------------------------------------------
+main() {
+  local cmd="${1:-}"
+
+  case "$cmd" in
+    init)
+      shift
+      cmd_init "$@"
+      ;;
+    push)
+      shift
+      local msg="${1:-}"
+      if [[ "$msg" == "-m" ]]; then
+        shift
+        msg="${1:-}"
+        shift || true
+      fi
+      sync_push "${msg:-}"
+      ;;
+    pull)
+      shift
+      local force="${1:-}"
+      sync_pull "$force"
+      ;;
+    status)
+      sync_status
+      ;;
+    install)
+      shift
+      cmd_install "$@"
+      ;;
+    doctor)
+      cmd_doctor
+      ;;
+    uninstall)
+      remove_wrapper
+      ;;
+    _post-pull-hook)
+      _post_pull_hook
+      ;;
+    -h|--help|help|"")
+      _usage
+      ;;
+    -v|--version|version)
+      echo "kitsync $KITSYNC_VERSION"
+      ;;
+    *)
+      log_error "Unknown command: $cmd"
+      _usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
