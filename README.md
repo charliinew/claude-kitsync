@@ -6,20 +6,27 @@ Sync your Claude config (`~/.claude/`) across machines using git. Background pul
 
 ## Quick Start
 
+**One command — everything configured automatically:**
+
 ```bash
-# 1. Install
 curl -fsSL https://raw.githubusercontent.com/charliinew/claude-kitsync/main/install.sh | bash
-
-# 2. Reload your shell
-source ~/.zshrc   # or ~/.bashrc
-
-# 3. Initialise (creates git repo in ~/.claude, installs shell wrapper)
-kitsync init --remote git@github.com:you/claude-config.git
-
-# 4. Done — use claude normally
-claude "write me a test"
-# Sync happens silently in the background
 ```
+
+The installer will:
+1. Install the `kitsync` binary
+2. Ask for your git remote URL (or skip if you don't have one yet)
+3. Initialise `~/.claude` as a git repo + install the shell wrapper
+
+Then run the one activation command it prints (e.g. `source ~/.zshrc`) and you're done.
+
+**If you already know your remote URL:**
+
+```bash
+KITSYNC_REMOTE=git@github.com:you/claude-config.git \
+  curl -fsSL https://raw.githubusercontent.com/charliinew/claude-kitsync/main/install.sh | bash
+```
+
+No prompts — fully automated setup.
 
 ---
 
