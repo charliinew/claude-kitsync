@@ -105,13 +105,73 @@ _select_tty() {
   printf '%s' "$choice"
 }
 
-# Build remote menu, create repo via gh if chosen, return URL
+# Create a new GitHub repo via gh CLI, return SSH URL
+_gh_create_repo_tty() {
+  local repo_name
+  repo_name="$(_read_tty "Repo name" "" "claude-config")"
+  local vis_choice
+  vis_choice="$(_select_tty "Visibility?" "Private  (recommended)" "Public")"
+  local vis_flag="--private"
+  [[ "$vis_choice" == "2" ]] && vis_flag="--public"
+
+  _step "Creating GitHub repo: $repo_name..."
+  if gh repo create "$repo_name" "$vis_flag" --description "Claude Code config sync" >/dev/null 2>&1; then
+    local gh_login
+    gh_login="$(gh api user -q .login 2>/dev/null)"
+    local result_url="git@github.com:${gh_login}/${repo_name}.git"
+    _ok "Repo created: github.com/${gh_login}/${repo_name}"
+    printf '%s' "$result_url"
+  else
+    _warn "gh repo create failed — enter URL manually."
+    printf '%s' "$(_read_tty "Git URL (SSH or HTTPS, blank to skip)" "")"
+  fi
+}
+
+# Browse existing GitHub repos via gh CLI, return selected SSH URL
+_gh_connect_repo_tty() {
+  _step "Fetching your GitHub repos..."
+
+  local repo_lines
+  repo_lines="$(gh repo list --limit 30 2>/dev/null | awk '{print $1}' || true)"
+
+  if [[ -z "$repo_lines" ]]; then
+    _warn "No repos found — enter URL manually."
+    printf '%s' "$(_read_tty "Git URL (SSH or HTTPS, blank to skip)" "")"
+    return
+  fi
+
+  local options=()
+  while IFS= read -r repo; do
+    [[ -n "$repo" ]] && options+=("$repo")
+  done <<< "$repo_lines"
+
+  local choice
+  choice="$(_select_tty "Select a repository:" "${options[@]}")"
+
+  local selected="${options[$((choice - 1))]}"
+  printf 'git@github.com:%s.git' "$selected"
+}
+
+# GitHub sub-menu: create new or connect existing
+_gh_repo_flow_tty() {
+  local action
+  action="$(_select_tty "GitHub repository:" \
+    "Create a new repo" \
+    "Connect to an existing repo")"
+
+  case "$action" in
+    1) _gh_create_repo_tty ;;
+    2) _gh_connect_repo_tty ;;
+  esac
+}
+
+# Build remote menu, return URL
 _select_remote_tty() {
   local options=()
   local has_gh=false
   if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
     has_gh=true
-    options+=("Create a new GitHub repo  (gh CLI)")
+    options+=("GitHub  (create new or connect existing)")
   fi
   options+=("Enter a URL  (SSH or HTTPS)")
   options+=("Skip — configure later")
@@ -120,31 +180,14 @@ _select_remote_tty() {
   choice="$(_select_tty "Where should your Claude config be stored?" "${options[@]}")"
 
   local actions=()
-  [[ "$has_gh" == "true" ]] && actions+=("gh_create")
+  [[ "$has_gh" == "true" ]] && actions+=("github")
   actions+=("url_input")
   actions+=("skip")
   local action="${actions[$((choice - 1))]}"
 
   case "$action" in
-    gh_create)
-      local repo_name
-      repo_name="$(_read_tty "Repo name" "" "claude-config")"
-      local vis_choice
-      vis_choice="$(_select_tty "Visibility?" "Private  (recommended)" "Public")"
-      local vis_flag="--private"
-      [[ "$vis_choice" == "2" ]] && vis_flag="--public"
-
-      _step "Creating GitHub repo: $repo_name..."
-      if gh repo create "$repo_name" "$vis_flag" --description "Claude Code config sync" >/dev/null 2>&1; then
-        local gh_login
-        gh_login="$(gh api user -q .login 2>/dev/null)"
-        local result_url="git@github.com:${gh_login}/${repo_name}.git"
-        _ok "Repo created: github.com/${gh_login}/${repo_name}"
-        printf '%s' "$result_url"
-      else
-        _warn "gh repo create failed — enter URL manually."
-        printf '%s' "$(_read_tty "Git URL (SSH or HTTPS, blank to skip)" "")"
-      fi
+    github)
+      _gh_repo_flow_tty
       ;;
     url_input)
       printf '%s' "$(_read_tty "Git URL (SSH or HTTPS, blank to skip)" "")"
