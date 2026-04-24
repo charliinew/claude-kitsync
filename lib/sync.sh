@@ -135,7 +135,13 @@ sync_push() {
   fi
 
   log_step "Committing: $commit_msg"
-  git -C "$CLAUDE_HOME" commit -m "$commit_msg"
+  local _commit_out
+  if _commit_out="$(git -C "$CLAUDE_HOME" commit -m "$commit_msg" 2>&1)"; then
+    printf "%s\n" "$_commit_out" | grep -Ev "^[[:space:]]+(create|delete) mode " || true
+  else
+    printf "%s\n" "$_commit_out" >&2
+    exit 1
+  fi
 
   log_step "Pushing to remote..."
   git -C "$CLAUDE_HOME" push
