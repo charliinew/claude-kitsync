@@ -53,10 +53,10 @@ _resolve_conflict() {
   local action=""
 
   while true; do
-    printf "${_CLR_YELLOW}[kitsync]${_CLR_RESET}  File exists: %s\n" "$dest_file" >&2
-    printf "  [s] skip   [o] overwrite   [b] backup+overwrite   [S] skip all   [O] overwrite all\n" >&2
-    printf "  Choice: " >&2
-    read -r choice
+    printf "${_CLR_YELLOW}[kitsync]${_CLR_RESET}  File exists: %s\n" "$dest_file" >/dev/tty
+    printf "  [s] skip   [o] overwrite   [b] backup+overwrite   [S] skip all   [O] overwrite all\n" >/dev/tty
+    printf "  Choice: " >/dev/tty
+    read -r choice </dev/tty
 
     case "$choice" in
       s|S) action="skip" ;;
