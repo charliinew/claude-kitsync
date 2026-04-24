@@ -249,8 +249,8 @@ GITIGNORE
 
     if [[ "$do_push" == true ]]; then
       log_step "Pushing to origin main..."
-      if git -C "$CLAUDE_HOME" push -u origin main 2>&1 || \
-         git -C "$CLAUDE_HOME" push -u origin HEAD 2>&1; then
+      if git -C "$CLAUDE_HOME" push -q -u origin main 2>&1 || \
+         git -C "$CLAUDE_HOME" push -q -u origin HEAD 2>&1; then
         log_success "Pushed to remote."
       else
         log_warn "Push failed — your commit is local only."
