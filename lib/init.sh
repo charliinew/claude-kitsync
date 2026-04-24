@@ -352,8 +352,25 @@ GITIGNORE
 
     if [[ "$do_push" == true ]]; then
       log_step "Pushing to origin main..."
-      if git -C "$CLAUDE_HOME" push -q -u origin main 2>&1 || \
-         git -C "$CLAUDE_HOME" push -q -u origin HEAD 2>&1; then
+      local _push_ok=false
+      if git -C "$CLAUDE_HOME" push -q -u origin main 2>/dev/null; then
+        _push_ok=true
+      elif git -C "$CLAUDE_HOME" push -q -u origin HEAD 2>/dev/null; then
+        _push_ok=true
+      fi
+
+      if [[ "$_push_ok" == false ]]; then
+        # Remote has existing commits (e.g. reconnecting to a previous config repo).
+        # Rebase local commit on top of remote history, preferring local files on conflict.
+        log_step "Remote has existing commits — rebasing local state on top..."
+        if git -C "$CLAUDE_HOME" pull --rebase --allow-unrelated-histories -X ours -q 2>/dev/null; then
+          if git -C "$CLAUDE_HOME" push -q 2>/dev/null; then
+            _push_ok=true
+          fi
+        fi
+      fi
+
+      if [[ "$_push_ok" == true ]]; then
         log_success "Pushed to remote."
       else
         log_warn "Push failed — your commit is local only."
