@@ -141,11 +141,12 @@ _select_menu() {
     IFS= read -rsn1 key </dev/tty || break
 
     if [[ "$key" == $'\x1b' ]]; then
-      # Arrow keys send ESC [ A/B — read one char at a time to avoid partial reads
-      local s1="" s2=""
-      IFS= read -rsn1 -t 0.15 s1 </dev/tty 2>/dev/null || true
-      IFS= read -rsn1 -t 0.15 s2 </dev/tty 2>/dev/null || true
+      # Arrow keys send ESC [ A/B — integer timeout required for bash 3.2 compat
+      local s1=""
+      IFS= read -rsn1 -t 1 s1 </dev/tty 2>/dev/null || true
       if [[ "$s1" == '[' ]]; then
+        local s2=""
+        IFS= read -rsn1 -t 1 s2 </dev/tty 2>/dev/null || true
         if [[ "$s2" == 'A' ]] && [[ $selected -gt 0 ]]; then
           selected=$(( selected - 1 ))
         elif [[ "$s2" == 'B' ]] && [[ $selected -lt $(( n - 1 )) ]]; then
