@@ -57,6 +57,7 @@ _usage() {
     ${_CLR_CYAN}pull${_CLR_RESET} [--force]          Pull latest config from remote
     ${_CLR_CYAN}status${_CLR_RESET}                  Show modified files and ahead/behind count
     ${_CLR_CYAN}install${_CLR_RESET} <url>           Merge a public kit into ~/.claude
+    ${_CLR_CYAN}upgrade${_CLR_RESET}                 Update claude-kitsync to the latest version
     ${_CLR_CYAN}doctor${_CLR_RESET}                  Run health checks on your setup
     ${_CLR_CYAN}uninstall${_CLR_RESET}               Remove claude-kitsync completely
 
@@ -195,6 +196,35 @@ cmd_uninstall() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_upgrade — pull latest version of claude-kitsync from GitHub
+# ---------------------------------------------------------------------------
+cmd_upgrade() {
+  log_step "Checking for updates..."
+
+  if [[ ! -d "$KITSYNC_ROOT/.git" ]]; then
+    log_warn "KITSYNC_ROOT is not a git repo — can't auto-upgrade."
+    log_warn "Re-run the installer to upgrade:"
+    log_warn "  curl -fsSL https://raw.githubusercontent.com/charliinew/claude-kitsync/main/install.sh | bash"
+    return 1
+  fi
+
+  local before_sha after_sha
+  before_sha="$(git -C "$KITSYNC_ROOT" rev-parse --short HEAD 2>/dev/null || echo '?')"
+
+  if git -C "$KITSYNC_ROOT" pull --rebase -q 2>&1; then
+    after_sha="$(git -C "$KITSYNC_ROOT" rev-parse --short HEAD 2>/dev/null || echo '?')"
+    if [[ "$before_sha" == "$after_sha" ]]; then
+      log_success "Already up to date  ($after_sha)"
+    else
+      log_success "Upgraded: $before_sha → $after_sha"
+    fi
+  else
+    log_warn "Upgrade failed — check your network and try again."
+    return 1
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # _post_pull_hook — internal hook called by shell wrapper after background pull
 # Normalises paths in settings.json.
 # ---------------------------------------------------------------------------
@@ -238,6 +268,9 @@ main() {
       ;;
     doctor)
       cmd_doctor
+      ;;
+    upgrade)
+      cmd_upgrade
       ;;
     uninstall)
       cmd_uninstall
