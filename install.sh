@@ -107,12 +107,15 @@ _select_tty() {
     IFS= read -rsn1 key </dev/tty || break
 
     if [[ "$key" == $'\x1b' ]]; then
-      local seq=""
-      IFS= read -rsn2 -t 0.1 seq </dev/tty 2>/dev/null || true
-      if [[ "$seq" == '[A' ]] && [[ $selected -gt 0 ]]; then
-        selected=$(( selected - 1 ))
-      elif [[ "$seq" == '[B' ]] && [[ $selected -lt $(( n - 1 )) ]]; then
-        selected=$(( selected + 1 ))
+      local s1="" s2=""
+      IFS= read -rsn1 -t 0.15 s1 </dev/tty 2>/dev/null || true
+      IFS= read -rsn1 -t 0.15 s2 </dev/tty 2>/dev/null || true
+      if [[ "$s1" == '[' ]]; then
+        if [[ "$s2" == 'A' ]] && [[ $selected -gt 0 ]]; then
+          selected=$(( selected - 1 ))
+        elif [[ "$s2" == 'B' ]] && [[ $selected -lt $(( n - 1 )) ]]; then
+          selected=$(( selected + 1 ))
+        fi
       fi
     elif [[ -z "$key" || "$key" == $'\r' || "$key" == $'\n' ]]; then
       break
