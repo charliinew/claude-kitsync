@@ -78,12 +78,89 @@ _confirm_tty() {
   [[ "$reply" =~ ^[Yy]$ ]]
 }
 
+# Numbered select menu via /dev/tty — works inside $(...) and curl|bash
+_select_tty() {
+  local prompt="$1"
+  shift
+  local n=$#
+
+  printf "\n" >/dev/tty
+  printf "  ${_c_bold}%s${_c_reset}\n\n" "$prompt" >/dev/tty
+  local i=1
+  for opt in "$@"; do
+    printf "  ${_c_cyan}%d${_c_reset}  %s\n" "$i" "$opt" >/dev/tty
+    i=$((i + 1))
+  done
+  printf "\n" >/dev/tty
+
+  local choice=""
+  while true; do
+    printf "  ${_c_bold}›${_c_reset} " >/dev/tty
+    read -r choice </dev/tty || true
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= n )); then
+      break
+    fi
+    printf "  Please enter a number between 1 and %d\n" "$n" >/dev/tty
+  done
+  printf '%s' "$choice"
+}
+
+# Build remote menu, create repo via gh if chosen, return URL
+_select_remote_tty() {
+  local options=()
+  local has_gh=false
+  if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
+    has_gh=true
+    options+=("Create a new GitHub repo  (gh CLI)")
+  fi
+  options+=("Enter a URL  (SSH or HTTPS)")
+  options+=("Skip — configure later")
+
+  local choice
+  choice="$(_select_tty "Where should your Claude config be stored?" "${options[@]}")"
+
+  local actions=()
+  [[ "$has_gh" == "true" ]] && actions+=("gh_create")
+  actions+=("url_input")
+  actions+=("skip")
+  local action="${actions[$((choice - 1))]}"
+
+  case "$action" in
+    gh_create)
+      local repo_name
+      repo_name="$(_read_tty "Repo name" "" "claude-config")"
+      local vis_choice
+      vis_choice="$(_select_tty "Visibility?" "Private  (recommended)" "Public")"
+      local vis_flag="--private"
+      [[ "$vis_choice" == "2" ]] && vis_flag="--public"
+
+      _step "Creating GitHub repo: $repo_name..."
+      if gh repo create "$repo_name" "$vis_flag" --description "Claude Code config sync" >/dev/null 2>&1; then
+        local gh_login
+        gh_login="$(gh api user -q .login 2>/dev/null)"
+        local result_url="git@github.com:${gh_login}/${repo_name}.git"
+        _ok "Repo created: github.com/${gh_login}/${repo_name}"
+        printf '%s' "$result_url"
+      else
+        _warn "gh repo create failed — enter URL manually."
+        printf '%s' "$(_read_tty "Git URL (SSH or HTTPS, blank to skip)" "")"
+      fi
+      ;;
+    url_input)
+      printf '%s' "$(_read_tty "Git URL (SSH or HTTPS, blank to skip)" "")"
+      ;;
+    skip)
+      printf ''
+      ;;
+  esac
+}
+
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
 printf "\n" >&2
-printf "  ${_c_bold}claude-kitsync${_c_reset} — sync your Claude config across machines\n" >&2
-printf "  %s\n" "$KITSYNC_REPO" >&2
+printf "  ${_c_bold}${_c_cyan}◆ claude-kitsync${_c_reset}  —  sync your Claude config across machines\n" >&2
+printf "  ${_c_bold}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_c_reset}\n" >&2
 printf "\n" >&2
 
 # ---------------------------------------------------------------------------
@@ -183,9 +260,7 @@ else
   local remote_url="${KITSYNC_REMOTE:-}"
 
   if [[ -z "$remote_url" ]]; then
-    printf "  Where should your Claude config be stored?\n" >&2
-    printf "  (Create a private GitHub repo first, e.g. github.com/new)\n\n" >&2
-    remote_url="$(_read_tty "  Git remote URL (SSH or HTTPS, blank to skip)" "")"
+    remote_url="$(_select_remote_tty)"
   else
     _log "Using remote: $remote_url"
   fi
