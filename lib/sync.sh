@@ -144,7 +144,10 @@ sync_push() {
   fi
 
   log_step "Pushing to remote..."
-  git -C "$CLAUDE_HOME" push -q
+  if ! git -C "$CLAUDE_HOME" push -q 2>/dev/null; then
+    # No upstream set yet — set it now and push
+    git -C "$CLAUDE_HOME" push -q -u origin HEAD
+  fi
 
   log_success "Push complete."
 }
