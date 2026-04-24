@@ -115,7 +115,7 @@ cmd_init() {
   if [[ -n "$template_path" ]] && [[ -f "$template_path" ]]; then
     if [[ -f "$gitignore_dest" ]]; then
       log_warn ".gitignore already exists in $CLAUDE_HOME — keeping existing file."
-      log_warn "To reset, delete it and run: kitsync init"
+      log_warn "To reset, delete it and run: claude-kitsync init"
     else
       log_step "Installing .gitignore from template..."
       cp "$template_path" "$gitignore_dest"
@@ -254,15 +254,15 @@ GITIGNORE
         log_success "Pushed to remote."
       else
         log_warn "Push failed — your commit is local only."
-        log_warn "Run 'kitsync push' to retry, or check your remote credentials."
+        log_warn "Run 'claude-kitsync push' to retry, or check your remote credentials."
       fi
     else
-      log_info "Skipping push. Run 'kitsync push' when ready."
+      log_info "Skipping push. Run 'claude-kitsync push' when ready."
     fi
   fi
 
   printf "\n"
-  log_success "kitsync init complete!"
+  log_success "claude-kitsync init complete!"
   log_info "Reload your shell or run: source ~/.zshrc (or ~/.bashrc)"
   log_info "Then invoke 'claude' normally — sync happens in the background."
   printf "\n"

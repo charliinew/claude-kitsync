@@ -47,13 +47,13 @@ log_step() {
 require_git_repo() {
   if [[ ! -d "$CLAUDE_HOME" ]]; then
     log_error "CLAUDE_HOME does not exist: $CLAUDE_HOME"
-    log_error "Run 'kitsync init' to initialise it."
+    log_error "Run 'claude-kitsync init' to initialise it."
     exit 1
   fi
 
   if ! git -C "$CLAUDE_HOME" rev-parse --git-dir &>/dev/null; then
     log_error "$CLAUDE_HOME is not a git repository."
-    log_error "Run 'kitsync init' to initialise it."
+    log_error "Run 'claude-kitsync init' to initialise it."
     exit 1
   fi
 }
