@@ -65,7 +65,7 @@ sync_pull() {
   log_step "Pulling from remote..."
 
   # Step 2: rebase pull with autostash and ours strategy
-  if git -C "$CLAUDE_HOME" pull --rebase --autostash -X ours -q 2>/dev/null; then
+  if git -C "$CLAUDE_HOME" pull --rebase --autostash --allow-unrelated-histories -X ours -q 2>/dev/null; then
     log_success "Pull complete."
     # Step 4: normalise absolute paths after pull
     normalize_paths
@@ -144,9 +144,11 @@ sync_push() {
   fi
 
   log_step "Pushing to remote..."
+  local _branch
+  _branch="$(git -C "$CLAUDE_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
   if ! git -C "$CLAUDE_HOME" push -q 2>/dev/null; then
-    # No upstream set yet — set it now and push
-    git -C "$CLAUDE_HOME" push -q -u origin HEAD
+    # No upstream set yet — set it and push
+    git -C "$CLAUDE_HOME" push -q -u origin "$_branch"
   fi
 
   log_success "Push complete."
