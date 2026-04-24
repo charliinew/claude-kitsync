@@ -44,34 +44,34 @@ KITSYNC_VERSION="1.0.0"
 _usage() {
   cat >&2 <<USAGE
 
-  ${_CLR_BOLD}claude-kitsync${_CLR_RESET} — sync your Claude config across machines  (v${KITSYNC_VERSION})
+  ${_CLR_BOLD}${_CLR_CYAN}◆ claude-kitsync${_CLR_RESET}  v${KITSYNC_VERSION}
+  ${_CLR_BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_RESET}
+  Sync your Claude config across machines via git.
 
-  ${_CLR_CYAN}USAGE${_CLR_RESET}
+  ${_CLR_BOLD}Usage${_CLR_RESET}
     claude-kitsync <command> [options]
 
-  ${_CLR_CYAN}COMMANDS${_CLR_RESET}
-    init [--remote <url>]     Initialise ~/.claude as a git repo + install shell wrapper
-    push [-m "message"]       Commit and push whitelisted changes to remote
-    pull [--force]            Pull latest changes from remote (skips if dirty tree)
-    status                    Show sync status (modified files, ahead/behind)
-    install <url>             Install a public kit into ~/.claude (selective merge)
-    doctor                    Diagnose the health of your claude-kitsync setup
-    uninstall                 Fully remove claude-kitsync (binary, PATH, wrapper)
+  ${_CLR_BOLD}Commands${_CLR_RESET}
+    ${_CLR_CYAN}init${_CLR_RESET} [--remote <url>]   Set up ~/.claude as a git repo + shell wrapper
+    ${_CLR_CYAN}push${_CLR_RESET} [-m "message"]     Commit and push config changes to remote
+    ${_CLR_CYAN}pull${_CLR_RESET} [--force]          Pull latest config from remote
+    ${_CLR_CYAN}status${_CLR_RESET}                  Show modified files and ahead/behind count
+    ${_CLR_CYAN}install${_CLR_RESET} <url>           Merge a public kit into ~/.claude
+    ${_CLR_CYAN}doctor${_CLR_RESET}                  Run health checks on your setup
+    ${_CLR_CYAN}uninstall${_CLR_RESET}               Remove claude-kitsync completely
 
-    ${_CLR_YELLOW}_post-pull-hook${_CLR_RESET}             Internal — called by shell wrapper after background pull
-
-  ${_CLR_CYAN}OPTIONS${_CLR_RESET}
+  ${_CLR_BOLD}Options${_CLR_RESET}
     -h, --help                Show this help
     -v, --version             Show version
 
-  ${_CLR_CYAN}EXAMPLES${_CLR_RESET}
-    claude-kitsync init --remote git@github.com:you/claude-config.git
+  ${_CLR_BOLD}Examples${_CLR_RESET}
+    claude-kitsync init
     claude-kitsync push -m "add new agent"
     claude-kitsync install https://github.com/someone/claude-kit
 
-  ${_CLR_CYAN}ENVIRONMENT${_CLR_RESET}
-    CLAUDE_HOME               Override default ~/.claude directory
-    KITSYNC_TIMEOUT           Background pull timeout in seconds (default: 2)
+  ${_CLR_BOLD}Environment${_CLR_RESET}
+    CLAUDE_HOME               Override default ~/.claude  (default: ~/.claude)
+    KITSYNC_TIMEOUT           Background pull timeout in seconds  (default: 2)
 
 USAGE
 }

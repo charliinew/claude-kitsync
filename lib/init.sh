@@ -54,6 +54,70 @@ _generate_settings_template() {
 }
 
 # ---------------------------------------------------------------------------
+# _create_repo_via_gh — create a GitHub repo and return its SSH URL
+# ---------------------------------------------------------------------------
+_create_repo_via_gh() {
+  local repo_name
+  repo_name="$(_read_tty "Repo name" "claude-config")"
+
+  local vis_choice
+  vis_choice="$(_select_menu "Visibility?" "Private  (recommended)" "Public")"
+  local vis_flag="--private"
+  [[ "$vis_choice" == "2" ]] && vis_flag="--public"
+
+  log_step "Creating GitHub repo: $repo_name..."
+  if gh repo create "$repo_name" "$vis_flag" --description "Claude Code config sync" >/dev/null 2>&1; then
+    local gh_login
+    gh_login="$(gh api user -q .login 2>/dev/null)"
+    local result_url="git@github.com:${gh_login}/${repo_name}.git"
+    log_success "Repo created: github.com/${gh_login}/${repo_name}"
+    printf '%s' "$result_url"
+  else
+    log_warn "gh repo create failed — please enter URL manually."
+    _read_tty "Git URL (SSH or HTTPS)"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# _prompt_remote_url — interactive menu to choose how to configure remote
+# Returns the remote URL on stdout (empty string = skip).
+# ---------------------------------------------------------------------------
+_prompt_remote_url() {
+  # Build option list based on gh availability
+  local options=()
+  local has_gh=false
+  if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
+    has_gh=true
+    options+=("Create a new GitHub repo  (gh CLI)")
+  fi
+  options+=("Enter a URL  (SSH: git@github.com:you/repo.git  or  HTTPS)")
+  options+=("Skip — I'll configure this later")
+
+  local choice
+  choice="$(_select_menu "Where should your Claude config be stored?" "${options[@]}")"
+
+  # Map choice index to action (gh_create only available when has_gh=true)
+  local actions=()
+  [[ "$has_gh" == "true" ]] && actions+=("gh_create")
+  actions+=("url_input")
+  actions+=("skip")
+
+  local action="${actions[$((choice - 1))]}"
+
+  case "$action" in
+    gh_create)
+      _create_repo_via_gh
+      ;;
+    url_input)
+      _read_tty "Git URL (SSH or HTTPS, blank to skip)"
+      ;;
+    skip)
+      printf ''
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # cmd_init — main entry point for `kitsync init`
 # Args: [--remote <url>]
 # ---------------------------------------------------------------------------
@@ -164,8 +228,7 @@ GITIGNORE
 
   if [[ "$has_remote" == "false" ]]; then
     if [[ -z "$remote_url" ]]; then
-      printf "${_CLR_CYAN}[kitsync]${_CLR_RESET}  Enter your remote git URL (leave blank to skip): " >&2
-      read -r remote_url
+      remote_url="$(_prompt_remote_url)"
     fi
 
     if [[ -n "$remote_url" ]]; then
@@ -173,7 +236,7 @@ GITIGNORE
       git -C "$CLAUDE_HOME" remote add origin "$remote_url"
       log_success "Remote added."
     else
-      log_warn "No remote configured — you can add one later with:"
+      log_warn "No remote configured — add one later:"
       log_warn "  git -C \"$CLAUDE_HOME\" remote add origin <url>"
     fi
   fi

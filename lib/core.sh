@@ -105,3 +105,56 @@ require_command() {
     die "Required command not found: $cmd"
   fi
 }
+
+# ---------------------------------------------------------------------------
+# _select_menu — numbered interactive menu via /dev/tty
+# Usage: choice=$(_select_menu "Prompt text" "Option A" "Option B" "Option C")
+# Returns the selected index (1-based) on stdout.
+# Writes prompt and options to /dev/tty — works even inside $(...).
+# ---------------------------------------------------------------------------
+_select_menu() {
+  local prompt="$1"
+  shift
+  local n=$#
+
+  printf "\n" >/dev/tty
+  printf "  ${_CLR_BOLD}%s${_CLR_RESET}\n\n" "$prompt" >/dev/tty
+  local i=1
+  for opt in "$@"; do
+    printf "  ${_CLR_CYAN}%d${_CLR_RESET}  %s\n" "$i" "$opt" >/dev/tty
+    i=$((i + 1))
+  done
+  printf "\n" >/dev/tty
+
+  local choice=""
+  while true; do
+    printf "  ${_CLR_BOLD}›${_CLR_RESET} " >/dev/tty
+    read -r choice </dev/tty || true
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= n )); then
+      break
+    fi
+    printf "  Please enter a number between 1 and %d\n" "$n" >/dev/tty
+  done
+
+  printf '%s' "$choice"
+}
+
+# ---------------------------------------------------------------------------
+# _read_tty — read a value from /dev/tty (works in $(...) and curl|bash)
+# Usage: value=$(_read_tty "Prompt" "default")
+# ---------------------------------------------------------------------------
+_read_tty() {
+  local prompt="$1"
+  local default="${2:-}"
+  local reply=""
+
+  if [[ -n "$default" ]]; then
+    printf "  %s [%s]: " "$prompt" "$default" >/dev/tty
+  else
+    printf "  %s: " "$prompt" >/dev/tty
+  fi
+
+  read -r reply </dev/tty || true
+  reply="${reply:-$default}"
+  printf '%s' "$reply"
+}
