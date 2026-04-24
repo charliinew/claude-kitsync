@@ -115,28 +115,71 @@ require_command() {
 _select_menu() {
   local prompt="$1"
   shift
-  local n=$#
+  local options=("$@")
+  local n=${#options[@]}
+  local selected=0
 
+  # Hide cursor; restore on interrupt
+  printf '\033[?25l' >/dev/tty
+  trap 'printf "\033[?25h" >/dev/tty' INT TERM
+
+  # Print header + initial menu
   printf "\n" >/dev/tty
-  printf "  ${_CLR_BOLD}%s${_CLR_RESET}\n\n" "$prompt" >/dev/tty
-  local i=1
-  for opt in "$@"; do
-    printf "  ${_CLR_CYAN}%d${_CLR_RESET}  %s\n" "$i" "$opt" >/dev/tty
-    i=$((i + 1))
+  printf "  ${_CLR_BOLD}%s${_CLR_RESET}\n" "$prompt" >/dev/tty
+  printf "\n" >/dev/tty
+  local i
+  for (( i=0; i<n; i++ )); do
+    if [[ $i -eq $selected ]]; then
+      printf "  ${_CLR_CYAN}${_CLR_BOLD}❯${_CLR_RESET}  ${_CLR_CYAN}%s${_CLR_RESET}\n" "${options[$i]}" >/dev/tty
+    else
+      printf "    %s\n" "${options[$i]}" >/dev/tty
+    fi
   done
-  printf "\n" >/dev/tty
 
-  local choice=""
   while true; do
-    printf "  ${_CLR_BOLD}›${_CLR_RESET} " >/dev/tty
-    read -r choice </dev/tty || true
-    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= n )); then
+    local key=""
+    IFS= read -rsn1 key </dev/tty || break
+
+    if [[ "$key" == $'\x1b' ]]; then
+      local seq=""
+      IFS= read -rsn2 -t 0.1 seq </dev/tty 2>/dev/null || true
+      if [[ "$seq" == '[A' ]] && [[ $selected -gt 0 ]]; then
+        selected=$(( selected - 1 ))
+      elif [[ "$seq" == '[B' ]] && [[ $selected -lt $(( n - 1 )) ]]; then
+        selected=$(( selected + 1 ))
+      fi
+    elif [[ -z "$key" || "$key" == $'\r' || "$key" == $'\n' ]]; then
       break
     fi
-    printf "  Please enter a number between 1 and %d\n" "$n" >/dev/tty
+
+    # Redraw options in place
+    printf "\033[%dA" "$n" >/dev/tty
+    for (( i=0; i<n; i++ )); do
+      printf "\033[2K\r" >/dev/tty
+      if [[ $i -eq $selected ]]; then
+        printf "  ${_CLR_CYAN}${_CLR_BOLD}❯${_CLR_RESET}  ${_CLR_CYAN}%s${_CLR_RESET}\n" "${options[$i]}" >/dev/tty
+      else
+        printf "    %s\n" "${options[$i]}" >/dev/tty
+      fi
+    done
   done
 
-  printf '%s' "$choice"
+  # Replace entire block with a compact summary line
+  # Block height: \n (1) + prompt\n (1) + \n (1) + n options = n+3
+  local total=$(( n + 3 ))
+  printf "\033[%dA" "$total" >/dev/tty
+  for (( i=0; i<total; i++ )); do
+    printf "\033[2K\r\n" >/dev/tty
+  done
+  printf "\033[%dA" "$total" >/dev/tty
+  printf "  ${_CLR_CYAN}◆${_CLR_RESET}  ${_CLR_BOLD}%s${_CLR_RESET}  ${_CLR_CYAN}%s${_CLR_RESET}\n" \
+    "$prompt" "${options[$selected]}" >/dev/tty
+
+  # Restore cursor
+  printf '\033[?25h' >/dev/tty
+  trap - INT TERM
+
+  printf '%s' "$(( selected + 1 ))"
 }
 
 # ---------------------------------------------------------------------------
@@ -149,9 +192,9 @@ _read_tty() {
   local reply=""
 
   if [[ -n "$default" ]]; then
-    printf "  %s [%s]: " "$prompt" "$default" >/dev/tty
+    printf "  ${_CLR_CYAN}◆${_CLR_RESET}  %s ${_CLR_BOLD}(%s)${_CLR_RESET}: " "$prompt" "$default" >/dev/tty
   else
-    printf "  %s: " "$prompt" >/dev/tty
+    printf "  ${_CLR_CYAN}◆${_CLR_RESET}  %s: " "$prompt" >/dev/tty
   fi
 
   read -r reply </dev/tty || true
