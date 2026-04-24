@@ -282,6 +282,56 @@ GITIGNORE
   fi
 
   # ---------------------------------------------------------------------------
+  # Step 3.5: Restore from remote (if remote has existing content)
+  # Only on fresh init — if already_git, user should run 'claude-kitsync pull'.
+  # ---------------------------------------------------------------------------
+  if [[ "$already_git" == "false" ]]; then
+    if git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null 2>&1; then
+      log_step "Checking remote for existing config..."
+      if git -C "$CLAUDE_HOME" fetch origin -q 2>/dev/null && \
+         git -C "$CLAUDE_HOME" rev-parse FETCH_HEAD &>/dev/null 2>&1; then
+
+        # Parallel arrays: labels shown in UI, paths used for git checkout
+        local restore_labels=(
+          "settings.json   — Claude settings"
+          "CLAUDE.md       — project memory / instructions"
+          "agents/         — custom agents"
+          "skills/         — slash commands"
+          "hooks/          — lifecycle hooks"
+          "scripts/        — helper scripts"
+          "rules/          — coding rules"
+        )
+        local restore_paths=(
+          "settings.json"
+          "CLAUDE.md"
+          "agents"
+          "skills"
+          "hooks"
+          "scripts"
+          "rules"
+        )
+
+        local selected_indices
+        selected_indices="$(_select_multi "Restore from your remote config?" "${restore_labels[@]}")"
+
+        if [[ -n "$selected_indices" ]]; then
+          log_step "Restoring selected items from remote..."
+          for idx in $selected_indices; do
+            local path="${restore_paths[$((idx - 1))]}"
+            if git -C "$CLAUDE_HOME" checkout FETCH_HEAD -- "$path" 2>/dev/null; then
+              log_success "Restored: $path"
+            fi
+          done
+        else
+          log_info "Skipping restore — starting with local config only."
+        fi
+      else
+        log_info "Remote is empty — nothing to restore."
+      fi
+    fi
+  fi
+
+  # ---------------------------------------------------------------------------
   # Step 4: Generate settings.template.json
   # ---------------------------------------------------------------------------
   _generate_settings_template

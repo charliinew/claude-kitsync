@@ -188,6 +188,104 @@ _select_menu() {
 }
 
 # ---------------------------------------------------------------------------
+# _select_multi — checkbox multi-select menu via /dev/tty
+# Usage: indices=$(_select_multi "Prompt" "opt1" "opt2" "opt3")
+# Returns space-separated 1-based indices of selected items on stdout.
+# All items selected by default; Space to toggle, Enter to confirm.
+# ---------------------------------------------------------------------------
+_select_multi() {
+  local prompt="$1"
+  shift
+  local options=("$@")
+  local n=${#options[@]}
+  local cur=0
+  local i
+
+  # All selected by default
+  local sel=()
+  for (( i=0; i<n; i++ )); do sel+=("1"); done
+
+  printf '\033[?25l' >/dev/tty
+  trap 'printf "\033[?25h" >/dev/tty' INT TERM
+
+  # Initial render
+  # Block layout: \n(1) + prompt\n(1) + \n(1) + n options + \n+hint\n(2) = n+5 total
+  printf "\n" >/dev/tty
+  printf "  ${_CLR_BOLD}%s${_CLR_RESET}\n" "$prompt" >/dev/tty
+  printf "\n" >/dev/tty
+  for (( i=0; i<n; i++ )); do
+    local mark; [[ "${sel[$i]}" == "1" ]] && mark="${_CLR_CYAN}◉${_CLR_RESET}" || mark="○"
+    if [[ $i -eq $cur ]]; then
+      printf "  ${_CLR_CYAN}${_CLR_BOLD}❯${_CLR_RESET}  %s  ${_CLR_CYAN}%s${_CLR_RESET}\n" "$mark" "${options[$i]}" >/dev/tty
+    else
+      printf "     %s  %s\n" "$mark" "${options[$i]}" >/dev/tty
+    fi
+  done
+  printf "\n  ${_CLR_BOLD}↑↓${_CLR_RESET} navigate · ${_CLR_BOLD}Space${_CLR_RESET} toggle · ${_CLR_BOLD}Enter${_CLR_RESET} confirm\n" >/dev/tty
+
+  while true; do
+    local key=""
+    IFS= read -rsn1 key </dev/tty || break
+
+    if [[ "$key" == $'\x1b' ]]; then
+      local s1=""
+      IFS= read -rsn1 -t 1 s1 </dev/tty 2>/dev/null || true
+      if [[ "$s1" == '[' ]]; then
+        local s2=""
+        IFS= read -rsn1 -t 1 s2 </dev/tty 2>/dev/null || true
+        if [[ "$s2" == 'A' ]] && [[ $cur -gt 0 ]]; then
+          cur=$(( cur - 1 ))
+        elif [[ "$s2" == 'B' ]] && [[ $cur -lt $(( n - 1 )) ]]; then
+          cur=$(( cur + 1 ))
+        fi
+      fi
+    elif [[ "$key" == ' ' ]]; then
+      [[ "${sel[$cur]}" == "1" ]] && sel[$cur]="0" || sel[$cur]="1"
+    elif [[ -z "$key" || "$key" == $'\r' || "$key" == $'\n' ]]; then
+      break
+    fi
+
+    # Redraw: n options + blank + hint = n+2 lines to go up and reprint
+    printf "\033[%dA" "$(( n + 2 ))" >/dev/tty
+    for (( i=0; i<n; i++ )); do
+      printf "\033[2K\r" >/dev/tty
+      local mark; [[ "${sel[$i]}" == "1" ]] && mark="${_CLR_CYAN}◉${_CLR_RESET}" || mark="○"
+      if [[ $i -eq $cur ]]; then
+        printf "  ${_CLR_CYAN}${_CLR_BOLD}❯${_CLR_RESET}  %s  ${_CLR_CYAN}%s${_CLR_RESET}\n" "$mark" "${options[$i]}" >/dev/tty
+      else
+        printf "     %s  %s\n" "$mark" "${options[$i]}" >/dev/tty
+      fi
+    done
+    printf "\033[2K\r\n" >/dev/tty
+    printf "\033[2K\r  ${_CLR_BOLD}↑↓${_CLR_RESET} navigate · ${_CLR_BOLD}Space${_CLR_RESET} toggle · ${_CLR_BOLD}Enter${_CLR_RESET} confirm\n" >/dev/tty
+  done
+
+  # Clear entire block and show summary (n+5 total lines)
+  local total=$(( n + 5 ))
+  printf "\033[%dA" "$total" >/dev/tty
+  for (( i=0; i<total; i++ )); do
+    printf "\033[2K\r\n" >/dev/tty
+  done
+  printf "\033[%dA" "$total" >/dev/tty
+  local count=0
+  for (( i=0; i<n; i++ )); do
+    [[ "${sel[$i]}" == "1" ]] && count=$(( count + 1 ))
+  done
+  printf "  ${_CLR_CYAN}◆${_CLR_RESET}  ${_CLR_BOLD}%s${_CLR_RESET}  ${_CLR_CYAN}%d/%d selected${_CLR_RESET}\n" \
+    "$prompt" "$count" "$n" >/dev/tty
+
+  printf '\033[?25h' >/dev/tty
+  trap - INT TERM
+
+  # Output: space-separated 1-based indices of selected items
+  local result=""
+  for (( i=0; i<n; i++ )); do
+    [[ "${sel[$i]}" == "1" ]] && result+="$(( i + 1 )) "
+  done
+  printf '%s' "${result% }"
+}
+
+# ---------------------------------------------------------------------------
 # _read_tty — read a value from /dev/tty (works in $(...) and curl|bash)
 # Usage: value=$(_read_tty "Prompt" "default")
 # ---------------------------------------------------------------------------
