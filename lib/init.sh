@@ -54,6 +54,15 @@ _generate_settings_template() {
 }
 
 # ---------------------------------------------------------------------------
+# _INIT_REMOTE_MODE — set by _github_repo_flow / _prompt_remote_url
+#   "new"     = created a fresh repo (remote will be empty)
+#   "connect" = connected to an existing repo (remote has content)
+#   "url"     = user entered a URL manually (auto-detect content later)
+#   "none"    = no remote configured
+# ---------------------------------------------------------------------------
+_INIT_REMOTE_MODE=""
+
+# ---------------------------------------------------------------------------
 # _create_repo_via_gh — create a new GitHub repo, return its SSH URL
 # ---------------------------------------------------------------------------
 _create_repo_via_gh() {
@@ -115,8 +124,8 @@ _github_repo_flow() {
     "Connect to an existing repo")"
 
   case "$action" in
-    1) _create_repo_via_gh ;;
-    2) _connect_repo_via_gh ;;
+    1) _INIT_REMOTE_MODE="new";     _create_repo_via_gh ;;
+    2) _INIT_REMOTE_MODE="connect"; _connect_repo_via_gh ;;
   esac
 }
 
@@ -146,12 +155,14 @@ _prompt_remote_url() {
 
   case "$action" in
     github)
-      _github_repo_flow
+      _github_repo_flow  # sets _INIT_REMOTE_MODE="new" or "connect"
       ;;
     url_input)
+      _INIT_REMOTE_MODE="url"
       _read_tty "Git URL (SSH or HTTPS, blank to skip)"
       ;;
     skip)
+      _INIT_REMOTE_MODE="none"
       printf ''
       ;;
   esac
@@ -272,6 +283,9 @@ GITIGNORE
     fi
 
     if [[ -n "$remote_url" ]]; then
+      # If mode wasn't set by the interactive prompt (i.e. --remote flag was used),
+      # auto-detect based on remote content — same as "url" mode.
+      [[ -z "$_INIT_REMOTE_MODE" ]] && _INIT_REMOTE_MODE="url"
       log_step "Adding remote origin: $remote_url"
       git -C "$CLAUDE_HOME" remote add origin "$remote_url"
       log_success "Remote added."
@@ -282,51 +296,32 @@ GITIGNORE
   fi
 
   # ---------------------------------------------------------------------------
-  # Step 3.5: Restore from remote (if remote has existing content)
+  # Step 3.5: Pull remote config (automatic)
   # Only on fresh init — if already_git, user should run 'claude-kitsync pull'.
+  # Fetch and restore any whitelisted item that isn't already present locally.
+  # Items already present locally are kept as-is (local takes precedence).
+  # Skipped for new repos (remote is empty) and when no remote is configured.
   # ---------------------------------------------------------------------------
-  if [[ "$already_git" == "false" ]]; then
+  if [[ "$already_git" == "false" ]] && [[ "$_INIT_REMOTE_MODE" != "new" ]]; then
     if git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null 2>&1; then
-      log_step "Checking remote for existing config..."
+      log_step "Pulling remote config..."
       if git -C "$CLAUDE_HOME" fetch origin -q 2>/dev/null && \
          git -C "$CLAUDE_HOME" rev-parse FETCH_HEAD &>/dev/null 2>&1; then
 
-        # Parallel arrays: labels shown in UI, paths used for git checkout
-        local restore_labels=(
-          "settings.json   — Claude settings"
-          "CLAUDE.md       — project memory / instructions"
-          "agents/         — custom agents"
-          "skills/         — slash commands"
-          "hooks/          — lifecycle hooks"
-          "scripts/        — helper scripts"
-          "rules/          — coding rules"
-        )
-        local restore_paths=(
-          "settings.json"
-          "CLAUDE.md"
-          "agents"
-          "skills"
-          "hooks"
-          "scripts"
-          "rules"
-        )
-
-        local selected_indices
-        selected_indices="$(_select_multi "Restore from your remote config?" "${restore_labels[@]}")"
-
-        if [[ -n "$selected_indices" ]]; then
-          log_step "Restoring selected items from remote..."
-          for idx in $selected_indices; do
-            local path="${restore_paths[$((idx - 1))]}"
-            if git -C "$CLAUDE_HOME" checkout FETCH_HEAD -- "$path" 2>/dev/null; then
-              log_success "Restored: $path"
+        local _pull_paths=("settings.json" "CLAUDE.md" "agents" "skills" "hooks" "scripts" "rules")
+        local _pulled=0
+        for _p in "${_pull_paths[@]}"; do
+          if [[ ! -e "$CLAUDE_HOME/$_p" ]]; then
+            if git -C "$CLAUDE_HOME" checkout FETCH_HEAD -- "$_p" 2>/dev/null; then
+              log_success "Pulled from remote: $_p"
+              (( _pulled++ )) || true
             fi
-          done
-        else
-          log_info "Skipping restore — starting with local config only."
-        fi
+          fi
+        done
+
+        [[ $_pulled -eq 0 ]] && log_info "Remote config pulled — all items already present locally."
       else
-        log_info "Remote is empty — nothing to restore."
+        log_info "Remote is empty — nothing to pull."
       fi
     fi
   fi
@@ -373,7 +368,7 @@ GITIGNORE
 
         if [[ -n "$_kit_selected" ]]; then
           log_step "Importing starter config into $CLAUDE_HOME..."
-          _KIT_CONFLICT_ALL="overwrite"  # user already confirmed via multi-select — no per-file prompts
+          _KIT_CONFLICT_ALL="skip"  # skip conflicting files — only import items not already present
           for _kidx in $_kit_selected; do
             local _kitem="${_kit_items[$((${_kidx} - 1))]}"
             local _ksrc="$_kit_root/$_kitem"
@@ -463,13 +458,10 @@ GITIGNORE
       fi
 
       if [[ "$_push_ok" == false ]]; then
-        # Remote has existing commits (e.g. reconnecting to a previous config repo).
-        # Rebase local commit on top of remote history, preferring local files on conflict.
-        log_step "Remote has existing commits — rebasing local state on top..."
+        # Remote has existing commits (connect mode) — rebase local on top of remote history.
+        log_step "Remote has existing commits — rebasing on top..."
         if git -C "$CLAUDE_HOME" pull --rebase --allow-unrelated-histories -X ours -q 2>/dev/null; then
-          if git -C "$CLAUDE_HOME" push -q 2>/dev/null; then
-            _push_ok=true
-          fi
+          git -C "$CLAUDE_HOME" push -q 2>/dev/null && _push_ok=true
         fi
       fi
 
