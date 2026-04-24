@@ -337,6 +337,59 @@ GITIGNORE
   _generate_settings_template
 
   # ---------------------------------------------------------------------------
+  # Step 4.5: Offer claude-kitsync bundled starter kit import
+  # Only on fresh init. Uses existing _copy_kit_dir/_copy_kit_item from install-kit.sh.
+  # ---------------------------------------------------------------------------
+  if [[ "$already_git" == "false" ]]; then
+    local _kit_root="${KITSYNC_ROOT}/kit"
+    if [[ -d "$_kit_root" ]]; then
+      local _kit_all_items=("settings.json" "CLAUDE.md" "agents" "skills" "hooks" "scripts" "rules")
+      local _kit_all_labels=(
+        "settings.json   — Claude settings"
+        "CLAUDE.md       — project memory / instructions"
+        "agents/         — custom agents"
+        "skills/         — slash commands"
+        "hooks/          — lifecycle hooks"
+        "scripts/        — helper scripts"
+        "rules/          — coding rules"
+      )
+
+      # Build list of categories that actually exist in kit/
+      local _kit_items=()
+      local _kit_labels=()
+      local _ki=0
+      for _kp in "${_kit_all_items[@]}"; do
+        if [[ -e "$_kit_root/$_kp" ]]; then
+          _kit_items+=("$_kp")
+          _kit_labels+=("${_kit_all_labels[$_ki]}")
+        fi
+        _ki=$(( _ki + 1 ))
+      done
+
+      if [[ ${#_kit_items[@]} -gt 0 ]]; then
+        printf "\n"
+        local _kit_selected
+        _kit_selected="$(_select_multi "Import claude-kitsync starter config?" "${_kit_labels[@]}")"
+
+        if [[ -n "$_kit_selected" ]]; then
+          log_step "Importing starter config into $CLAUDE_HOME..."
+          _KIT_CONFLICT_ALL=""
+          for _kidx in $_kit_selected; do
+            local _kitem="${_kit_items[$((${_kidx} - 1))]}"
+            local _ksrc="$_kit_root/$_kitem"
+            if [[ -d "$_ksrc" ]]; then
+              _copy_kit_dir "$_ksrc" "$CLAUDE_HOME"
+            elif [[ -f "$_ksrc" ]]; then
+              _copy_kit_item "$_ksrc" "$CLAUDE_HOME/$_kitem"
+            fi
+          done
+          log_success "Starter config imported."
+        fi
+      fi
+    fi
+  fi
+
+  # ---------------------------------------------------------------------------
   # Step 5: Initial commit
   # ---------------------------------------------------------------------------
   log_step "Staging whitelisted files for initial commit..."
