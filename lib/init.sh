@@ -217,7 +217,13 @@ GITIGNORE
 
   if ! git -C "$CLAUDE_HOME" diff --cached --quiet 2>/dev/null; then
     log_step "Creating initial commit..."
-    git -C "$CLAUDE_HOME" commit -m "kitsync: initial commit [$(date '+%Y-%m-%d')]"
+    local _commit_out
+    if _commit_out="$(git -C "$CLAUDE_HOME" commit -m "kitsync: initial commit [$(date '+%Y-%m-%d')]" 2>&1)"; then
+      printf "%s\n" "$_commit_out" | grep -Ev "^[[:space:]]+(create|delete) mode " || true
+    else
+      printf "%s\n" "$_commit_out" >&2
+      exit 1
+    fi
     log_success "Initial commit created."
   else
     log_info "Nothing staged for initial commit."
@@ -243,9 +249,13 @@ GITIGNORE
 
     if [[ "$do_push" == true ]]; then
       log_step "Pushing to origin main..."
-      git -C "$CLAUDE_HOME" push -u origin main 2>/dev/null || \
-        git -C "$CLAUDE_HOME" push -u origin HEAD
-      log_success "Pushed to remote."
+      if git -C "$CLAUDE_HOME" push -u origin main 2>&1 || \
+         git -C "$CLAUDE_HOME" push -u origin HEAD 2>&1; then
+        log_success "Pushed to remote."
+      else
+        log_warn "Push failed — your commit is local only."
+        log_warn "Run 'kitsync push' to retry, or check your remote credentials."
+      fi
     else
       log_info "Skipping push. Run 'kitsync push' when ready."
     fi
