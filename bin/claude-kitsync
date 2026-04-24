@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bin/kitsync — main CLI dispatcher for claude-kitsync
+# bin/claude-kitsync — main CLI dispatcher for claude-kitsync
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
@@ -44,10 +44,10 @@ KITSYNC_VERSION="1.0.0"
 _usage() {
   cat >&2 <<USAGE
 
-  ${_CLR_BOLD}kitsync${_CLR_RESET} — sync your Claude config across machines  (v${KITSYNC_VERSION})
+  ${_CLR_BOLD}claude-kitsync${_CLR_RESET} — sync your Claude config across machines  (v${KITSYNC_VERSION})
 
   ${_CLR_CYAN}USAGE${_CLR_RESET}
-    kitsync <command> [options]
+    claude-kitsync <command> [options]
 
   ${_CLR_CYAN}COMMANDS${_CLR_RESET}
     init [--remote <url>]     Initialise ~/.claude as a git repo + install shell wrapper
@@ -55,8 +55,8 @@ _usage() {
     pull [--force]            Pull latest changes from remote (skips if dirty tree)
     status                    Show sync status (modified files, ahead/behind)
     install <url>             Install a public kit into ~/.claude (selective merge)
-    doctor                    Diagnose the health of your kitsync setup
-    uninstall                 Remove the shell wrapper from rc files
+    doctor                    Diagnose the health of your claude-kitsync setup
+    uninstall                 Fully remove claude-kitsync (binary, PATH, wrapper)
 
     ${_CLR_YELLOW}_post-pull-hook${_CLR_RESET}             Internal — called by shell wrapper after background pull
 
@@ -65,9 +65,9 @@ _usage() {
     -v, --version             Show version
 
   ${_CLR_CYAN}EXAMPLES${_CLR_RESET}
-    kitsync init --remote git@github.com:you/claude-config.git
-    kitsync push -m "add new agent"
-    kitsync install https://github.com/someone/claude-kit
+    claude-kitsync init --remote git@github.com:you/claude-config.git
+    claude-kitsync push -m "add new agent"
+    claude-kitsync install https://github.com/someone/claude-kit
 
   ${_CLR_CYAN}ENVIRONMENT${_CLR_RESET}
     CLAUDE_HOME               Override default ~/.claude directory
@@ -77,20 +77,20 @@ USAGE
 }
 
 # ---------------------------------------------------------------------------
-# cmd_doctor — diagnose health of the kitsync setup
+# cmd_doctor — diagnose health of the claude-kitsync setup
 # ---------------------------------------------------------------------------
 cmd_doctor() {
   local errors=0
   local warnings=0
 
   printf "\n"
-  log_info "Running kitsync doctor...\n"
+  log_info "Running claude-kitsync doctor...\n"
 
   # Check 1: CLAUDE_HOME exists
   if [[ -d "$CLAUDE_HOME" ]]; then
     log_success "[1/5] CLAUDE_HOME exists: $CLAUDE_HOME"
   else
-    log_error "[1/5] CLAUDE_HOME missing: $CLAUDE_HOME — run: kitsync init"
+    log_error "[1/5] CLAUDE_HOME missing: $CLAUDE_HOME — run: claude-kitsync init"
     errors=$((errors + 1))
   fi
 
@@ -98,7 +98,7 @@ cmd_doctor() {
   if git -C "$CLAUDE_HOME" rev-parse --git-dir &>/dev/null 2>&1; then
     log_success "[2/5] $CLAUDE_HOME is a git repository"
   else
-    log_error "[2/5] Not a git repo — run: kitsync init"
+    log_error "[2/5] Not a git repo — run: claude-kitsync init"
     errors=$((errors + 1))
   fi
 
@@ -134,7 +134,7 @@ cmd_doctor() {
   if [[ "$wrapper_found" == "true" ]]; then
     log_success "[5/5] Shell wrapper found in rc file(s)"
   else
-    log_warn "[5/5] Shell wrapper not found — run: kitsync init"
+    log_warn "[5/5] Shell wrapper not found — run: claude-kitsync init"
     warnings=$((warnings + 1))
   fi
 
@@ -147,9 +147,51 @@ cmd_doctor() {
     log_warn "Doctor found $warnings warning(s) — review recommended."
     return 0
   else
-    log_success "All checks passed — kitsync is healthy."
+    log_success "All checks passed — claude-kitsync is healthy."
     return 0
   fi
+}
+
+# ---------------------------------------------------------------------------
+# cmd_uninstall — full removal of claude-kitsync
+#   1. Remove shell wrapper (claude() function) from rc files
+#   2. Remove PATH injection from rc files
+#   3. Remove binary symlink
+#   4. Remove installation directory
+# ---------------------------------------------------------------------------
+cmd_uninstall() {
+  printf "\n"
+  log_info "Uninstalling claude-kitsync...\n"
+
+  # Step 1: Remove shell wrapper block from rc files
+  remove_wrapper
+
+  # Step 2: Remove PATH entry from rc files
+  _remove_path_from_rc "${ZDOTDIR:-$HOME}/.zshrc"
+  _remove_path_from_rc "$HOME/.bashrc"
+
+  # Step 3: Remove binary symlink (find it via PATH lookup)
+  local bin_symlink
+  bin_symlink="$(command -v claude-kitsync 2>/dev/null || true)"
+  if [[ -n "$bin_symlink" ]] && [[ -L "$bin_symlink" ]]; then
+    rm "$bin_symlink"
+    log_success "Removed binary: $bin_symlink"
+  elif [[ -L "$HOME/.local/bin/claude-kitsync" ]]; then
+    rm "$HOME/.local/bin/claude-kitsync"
+    log_success "Removed binary: $HOME/.local/bin/claude-kitsync"
+  fi
+
+  # Step 4: Remove installation directory
+  # KITSYNC_ROOT is already set to the install dir (libs are loaded, safe to delete)
+  if [[ -d "$KITSYNC_ROOT" ]]; then
+    rm -rf "$KITSYNC_ROOT"
+    log_success "Removed installation: $KITSYNC_ROOT"
+  fi
+
+  printf "\n"
+  log_success "claude-kitsync fully uninstalled."
+  log_info "Run 'exec \$SHELL' or open a new terminal to complete the removal."
+  printf "\n"
 }
 
 # ---------------------------------------------------------------------------
@@ -198,7 +240,7 @@ main() {
       cmd_doctor
       ;;
     uninstall)
-      remove_wrapper
+      cmd_uninstall
       ;;
     _post-pull-hook)
       _post_pull_hook
@@ -211,7 +253,7 @@ main() {
       _usage
       ;;
     -v|--version|version)
-      echo "kitsync $KITSYNC_VERSION"
+      echo "claude-kitsync $KITSYNC_VERSION"
       ;;
     *)
       log_error "Unknown command: $cmd"

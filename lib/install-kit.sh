@@ -167,7 +167,7 @@ cmd_install() {
   local kit_url="${1:-}"
 
   if [[ -z "$kit_url" ]]; then
-    die "Usage: kitsync install <github-url>"
+    die "Usage: claude-kitsync install <github-url>"
   fi
 
   require_command git
@@ -226,6 +226,6 @@ cmd_install() {
   # Step 4: Cleanup (handled by trap)
   # ---------------------------------------------------------------------------
   log_success "Kit installation complete."
-  log_info "Review changes with: kitsync status"
-  log_info "Commit and push with: kitsync push -m 'install kit from $kit_url'"
+  log_info "Review changes with: claude-kitsync status"
+  log_info "Commit and push with: claude-kitsync push -m 'install kit from $kit_url'"
 }

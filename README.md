@@ -13,7 +13,7 @@ curl -fsSL https://raw.githubusercontent.com/charliinew/claude-kitsync/main/inst
 ```
 
 The installer will:
-1. Install the `kitsync` binary
+1. Install the `claude-kitsync` binary
 2. Ask for your git remote URL (or skip if you don't have one yet)
 3. Initialise `~/.claude` as a git repo + install the shell wrapper
 
@@ -34,19 +34,19 @@ No prompts — fully automated setup.
 
 | Command | Description |
 |---|---|
-| `kitsync init [--remote <url>]` | Initialise `~/.claude` as git repo + install shell wrapper |
-| `kitsync push [-m "message"]` | Commit and push whitelisted changes to remote |
-| `kitsync pull [--force]` | Pull manually from remote (skips if dirty working tree) |
-| `kitsync status` | Show modified files and ahead/behind count |
-| `kitsync install <url>` | Merge a public kit into `~/.claude` (selective, no overwrite of local config) |
-| `kitsync doctor` | Diagnose the health of your kitsync setup (5 checks) |
-| `kitsync uninstall` | Remove the shell wrapper from rc files |
+| `claude-kitsync init [--remote <url>]` | Initialise `~/.claude` as git repo + install shell wrapper |
+| `claude-kitsync push [-m "message"]` | Commit and push whitelisted changes to remote |
+| `claude-kitsync pull [--force]` | Pull manually from remote (skips if dirty working tree) |
+| `claude-kitsync status` | Show modified files and ahead/behind count |
+| `claude-kitsync install <url>` | Merge a public kit into `~/.claude` (selective, no overwrite of local config) |
+| `claude-kitsync doctor` | Diagnose the health of your setup (5 checks) |
+| `claude-kitsync uninstall` | Fully remove claude-kitsync (binary, PATH, shell wrapper) |
 
 ---
 
 ## How It Works
 
-**Shell wrapper** — `kitsync init` injects a `claude()` function into your `~/.zshrc` (or `~/.bashrc`):
+**Shell wrapper** — `claude-kitsync init` injects a `claude()` function into your `~/.zshrc` (or `~/.bashrc`):
 
 ```bash
 claude() {
@@ -63,7 +63,7 @@ claude() {
 - `settings.json`, `CLAUDE.md`
 - `agents/`, `skills/`, `hooks/`, `scripts/`, `rules/`
 
-**Absolute path normalisation** — `settings.json` often contains paths like `/Users/alice/.claude/hooks/...`. After every pull, `kitsync` rewrites these to match the current machine's `$HOME/.claude/`.
+**Absolute path normalisation** — `settings.json` often contains paths like `/Users/alice/.claude/hooks/...`. After every pull, `claude-kitsync` rewrites these to match the current machine's `$HOME/.claude/`.
 
 ---
 
@@ -71,24 +71,24 @@ claude() {
 
 ### Will `.credentials.json` ever be synced?
 
-No. The `.gitignore` uses a deny-by-default allowlist — only explicitly whitelisted files can be committed. `.credentials.json` is additionally double-blocked and `kitsync push` will abort with an error if it somehow ends up staged.
+No. The `.gitignore` uses a deny-by-default allowlist — only explicitly whitelisted files can be committed. `.credentials.json` is additionally double-blocked and `claude-kitsync push` will abort with an error if it somehow ends up staged.
 
 ### What happens if I have uncommitted changes when `claude` runs?
 
-The background pull is skipped with a warning (you won't see it since it's background). Your local changes are never overwritten. Run `kitsync push` to commit them first.
+The background pull is skipped with a warning (you won't see it since it's background). Your local changes are never overwritten. Run `claude-kitsync push` to commit them first.
 
 ### My `settings.json` has broken paths after pulling on a new machine.
 
-Run `kitsync pull` manually — it calls `normalize_paths()` which fixes all absolute paths to match the current `$HOME`. This also happens automatically in the background wrapper.
+Run `claude-kitsync pull` manually — it calls `normalize_paths()` which fixes all absolute paths to match the current `$HOME`. This also happens automatically in the background wrapper.
 
 ### Can I use this with a private repo?
 
-Yes — `kitsync init --remote git@github.com:you/private-claude-config.git`. The remote is just a standard git remote. Use SSH keys or HTTPS tokens as you normally would.
+Yes — `claude-kitsync init --remote git@github.com:you/private-claude-config.git`. The remote is just a standard git remote. Use SSH keys or HTTPS tokens as you normally would.
 
 ### How do I install someone else's agent pack?
 
 ```bash
-kitsync install https://github.com/someone/claude-kit
+claude-kitsync install https://github.com/someone/claude-kit
 ```
 
 This clones the kit into a temp directory, then copies only `agents/`, `skills/`, `hooks/`, `rules/`, and `CLAUDE.md`. It never touches your `settings.json`, `settings.local.json`, or `.credentials.json`. You'll be prompted for each conflicting file: skip / overwrite / backup.
@@ -99,19 +99,28 @@ A copy of `settings.json` with absolute paths replaced by `__CLAUDE_HOME__` toke
 
 ### Can I override `CLAUDE_HOME`?
 
-Yes: `CLAUDE_HOME=/path/to/other-claude kitsync status` or export it permanently in your shell rc.
+Yes: `CLAUDE_HOME=/path/to/other-claude claude-kitsync status` or export it permanently in your shell rc.
 
-### `kitsync doctor` says my wrapper is missing
+### `claude-kitsync doctor` says my wrapper is missing
 
-Run `kitsync init` again — it's idempotent. It will add the wrapper block without duplicating it.
+Run `claude-kitsync init` again — it's idempotent. It will add the wrapper block without duplicating it.
+
+### How do I uninstall completely?
+
+```bash
+claude-kitsync uninstall
+exec $SHELL
+```
+
+This removes the binary, PATH entry, and shell wrapper in one command.
 
 ---
 
 ## Security
 
 - **Allowlist gitignore** — deny-by-default, only whitelisted files can be staged
-- **Double guard on `.credentials.json`** — `.gitignore` + runtime abort in `kitsync push`
-- **No code execution during `kitsync install`** — only file copies, no scripts run
+- **Double guard on `.credentials.json`** — `.gitignore` + runtime abort in `claude-kitsync push`
+- **No code execution during `claude-kitsync install`** — only file copies, no scripts run
 - **Partial download protection in `install.sh`** — body wrapped in a function, only called at the last line
 
 ---

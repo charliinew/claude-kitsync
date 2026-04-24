@@ -14,15 +14,15 @@ generate_wrapper() {
 
   cat <<'WRAPPER_BODY'
 # kitsync-start
-# This block is managed by kitsync — do not edit manually.
-# To update: run `kitsync init` again or edit ~/.zshrc after this block.
+# This block is managed by claude-kitsync — do not edit manually.
+# To update: run `claude-kitsync init` again or edit ~/.zshrc after this block.
 claude() {
   local _claude_home="${CLAUDE_HOME:-$HOME/.claude}"
   if [[ -d "$_claude_home" ]] && git -C "$_claude_home" rev-parse --git-dir &>/dev/null 2>&1; then
     (
       timeout KITSYNC_TIMEOUT_PLACEHOLDER git -C "$_claude_home" pull --rebase --autostash -q 2>/dev/null
-      if command -v kitsync &>/dev/null; then
-        kitsync _post-pull-hook 2>/dev/null || true
+      if command -v claude-kitsync &>/dev/null; then
+        claude-kitsync _post-pull-hook 2>/dev/null || true
       fi
     ) &
     disown
@@ -163,5 +163,23 @@ install_wrapper_auto() {
 remove_wrapper() {
   _remove_from_rc "${ZDOTDIR:-$HOME}/.zshrc"
   _remove_from_rc "$HOME/.bashrc"
-  log_success "kitsync wrapper removed from shell rc files."
+  log_success "Shell wrapper removed from rc files."
+}
+
+# ---------------------------------------------------------------------------
+# _remove_path_from_rc — remove the PATH injection line added by install.sh
+# Handles both old marker (# kitsync PATH) and new (# claude-kitsync PATH)
+# ---------------------------------------------------------------------------
+_remove_path_from_rc() {
+  local rc_file="$1"
+  if [[ ! -f "$rc_file" ]]; then return 0; fi
+  if ! grep -qF "kitsync PATH" "$rc_file" 2>/dev/null; then return 0; fi
+
+  local tmp_file
+  tmp_file="$(mktemp)"
+  # Remove the marker line and the export PATH line that follows it
+  awk '/^# kitsync PATH$|^# claude-kitsync PATH$/{skip=1; next} skip{skip=0; next} {print}' \
+    "$rc_file" > "$tmp_file"
+  mv "$tmp_file" "$rc_file"
+  log_info "Removed PATH entry from $rc_file"
 }
