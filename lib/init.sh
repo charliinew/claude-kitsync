@@ -373,7 +373,7 @@ GITIGNORE
 
         if [[ -n "$_kit_selected" ]]; then
           log_step "Importing starter config into $CLAUDE_HOME..."
-          _KIT_CONFLICT_ALL=""
+          _KIT_CONFLICT_ALL="overwrite"  # user already confirmed via multi-select — no per-file prompts
           for _kidx in $_kit_selected; do
             local _kitem="${_kit_items[$((${_kidx} - 1))]}"
             local _ksrc="$_kit_root/$_kitem"
