@@ -54,7 +54,7 @@ _generate_settings_template() {
 }
 
 # ---------------------------------------------------------------------------
-# _create_repo_via_gh — create a GitHub repo and return its SSH URL
+# _create_repo_via_gh — create a new GitHub repo, return its SSH URL
 # ---------------------------------------------------------------------------
 _create_repo_via_gh() {
   local repo_name
@@ -79,16 +79,57 @@ _create_repo_via_gh() {
 }
 
 # ---------------------------------------------------------------------------
+# _connect_repo_via_gh — browse existing GitHub repos, return selected SSH URL
+# ---------------------------------------------------------------------------
+_connect_repo_via_gh() {
+  log_step "Fetching your GitHub repos..."
+
+  local repo_lines
+  repo_lines="$(gh repo list --limit 30 2>/dev/null | awk '{print $1}' || true)"
+
+  if [[ -z "$repo_lines" ]]; then
+    log_warn "No repos found — enter URL manually."
+    _read_tty "Git URL (SSH or HTTPS, blank to skip)"
+    return
+  fi
+
+  local options=()
+  while IFS= read -r repo; do
+    [[ -n "$repo" ]] && options+=("$repo")
+  done <<< "$repo_lines"
+
+  local choice
+  choice="$(_select_menu "Select a repository:" "${options[@]}")"
+
+  local selected="${options[$((choice - 1))]}"
+  printf 'git@github.com:%s.git' "$selected"
+}
+
+# ---------------------------------------------------------------------------
+# _github_repo_flow — sub-menu: create new or connect to existing GitHub repo
+# ---------------------------------------------------------------------------
+_github_repo_flow() {
+  local action
+  action="$(_select_menu "GitHub repository:" \
+    "Create a new repo" \
+    "Connect to an existing repo")"
+
+  case "$action" in
+    1) _create_repo_via_gh ;;
+    2) _connect_repo_via_gh ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # _prompt_remote_url — interactive menu to choose how to configure remote
 # Returns the remote URL on stdout (empty string = skip).
 # ---------------------------------------------------------------------------
 _prompt_remote_url() {
-  # Build option list based on gh availability
   local options=()
   local has_gh=false
   if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
     has_gh=true
-    options+=("Create a new GitHub repo  (gh CLI)")
+    options+=("GitHub  (create new or connect existing)")
   fi
   options+=("Enter a URL  (SSH: git@github.com:you/repo.git  or  HTTPS)")
   options+=("Skip — I'll configure this later")
@@ -96,17 +137,16 @@ _prompt_remote_url() {
   local choice
   choice="$(_select_menu "Where should your Claude config be stored?" "${options[@]}")"
 
-  # Map choice index to action (gh_create only available when has_gh=true)
   local actions=()
-  [[ "$has_gh" == "true" ]] && actions+=("gh_create")
+  [[ "$has_gh" == "true" ]] && actions+=("github")
   actions+=("url_input")
   actions+=("skip")
 
   local action="${actions[$((choice - 1))]}"
 
   case "$action" in
-    gh_create)
-      _create_repo_via_gh
+    github)
+      _github_repo_flow
       ;;
     url_input)
       _read_tty "Git URL (SSH or HTTPS, blank to skip)"
