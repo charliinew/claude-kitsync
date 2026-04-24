@@ -126,8 +126,8 @@ fi
 # Step 3: Symlink binary
 # ---------------------------------------------------------------------------
 mkdir -p "$bin_dir"
-local kitsync_bin="$install_dir/bin/kitsync"
-local kitsync_dest="$bin_dir/kitsync"
+local kitsync_bin="$install_dir/bin/claude-kitsync"
+local kitsync_dest="$bin_dir/claude-kitsync"
 
 [[ -f "$kitsync_bin" ]] || _die "Binary not found at $kitsync_bin — repo may be corrupt."
 chmod +x "$kitsync_bin"
@@ -153,8 +153,9 @@ esac
 
 if [[ -n "$rc_file" ]]; then
   touch "$rc_file"
-  if ! grep -qF "# kitsync PATH" "$rc_file" 2>/dev/null; then
-    printf '\n# kitsync PATH\nexport PATH="%s:$PATH"\n' "$bin_dir" >> "$rc_file"
+  if ! grep -qF "claude-kitsync PATH" "$rc_file" 2>/dev/null && \
+     ! grep -qF "kitsync PATH" "$rc_file" 2>/dev/null; then
+    printf '\n# claude-kitsync PATH\nexport PATH="%s:$PATH"\n' "$bin_dir" >> "$rc_file"
   fi
 fi
 
@@ -194,7 +195,7 @@ else
     KITSYNC_ROOT="$install_dir" "$kitsync_dest" init --remote "$remote_url"
   else
     _warn "No remote URL provided — running init without remote."
-    _warn "Run 'kitsync init --remote <url>' later to configure sync."
+    _warn "Run 'claude-kitsync init --remote <url>' later to configure sync."
     KITSYNC_ROOT="$install_dir" "$kitsync_dest" init
   fi
 fi

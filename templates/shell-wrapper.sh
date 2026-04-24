@@ -9,11 +9,11 @@
 #
 # The function is compatible with both zsh and bash.
 #
-# DO NOT source this file directly — use `kitsync init` to install it.
+# DO NOT source this file directly — use `claude-kitsync init` to install it.
 
 # kitsync-start
-# This block is managed by kitsync — do not edit manually.
-# To update: run `kitsync init` or remove the block and re-run.
+# This block is managed by claude-kitsync — do not edit manually.
+# To update: run `claude-kitsync init` or remove the block and re-run.
 claude() {
   # Resolve CLAUDE_HOME at call time (allows per-session override)
   local _ks_home="${CLAUDE_HOME:-$HOME/.claude}"
@@ -26,8 +26,8 @@ claude() {
       timeout "$_ks_timeout" git -C "$_ks_home" pull --rebase --autostash -q 2>/dev/null
 
       # Post-pull hook: normalise absolute paths in settings.json
-      if command -v kitsync &>/dev/null; then
-        kitsync _post-pull-hook 2>/dev/null || true
+      if command -v claude-kitsync &>/dev/null; then
+        claude-kitsync _post-pull-hook 2>/dev/null || true
       fi
     ) &
     disown

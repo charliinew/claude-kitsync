@@ -57,7 +57,7 @@ sync_pull() {
       log_warn "Dirty tree detected — force flag passed, continuing anyway."
     else
       log_warn "Uncommitted changes detected in $CLAUDE_HOME — skipping auto-pull."
-      log_warn "Commit or stash your changes first, or run: kitsync pull --force"
+      log_warn "Commit or stash your changes first, or run: claude-kitsync pull --force"
       return 0
     fi
   fi
