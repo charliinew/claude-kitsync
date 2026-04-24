@@ -144,7 +144,7 @@ sync_push() {
   fi
 
   log_step "Pushing to remote..."
-  git -C "$CLAUDE_HOME" push
+  git -C "$CLAUDE_HOME" push -q
 
   log_success "Push complete."
 }
