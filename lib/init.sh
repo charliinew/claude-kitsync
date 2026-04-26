@@ -296,30 +296,55 @@ GITIGNORE
   fi
 
   # ---------------------------------------------------------------------------
-  # Step 3.5: Pull remote config (automatic)
+  # Step 3.5: Merge remote config (automatic)
   # Only on fresh init — if already_git, user should run 'claude-kitsync pull'.
-  # Fetch and restore any whitelisted item that isn't already present locally.
-  # Items already present locally are kept as-is (local takes precedence).
+  # Stages local files, creates an initial commit, then merges FETCH_HEAD so
+  # that remote-only files are pulled in and conflicts resolve toward the repo
+  # (remote wins — repo is considered the source of truth).
   # Skipped for new repos (remote is empty) and when no remote is configured.
   # ---------------------------------------------------------------------------
   if [[ "$already_git" == "false" ]] && [[ "$_INIT_REMOTE_MODE" != "new" ]]; then
     if git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null 2>&1; then
-      log_step "Pulling remote config..."
+      log_step "Merging remote config..."
       if git -C "$CLAUDE_HOME" fetch origin -q 2>/dev/null && \
          git -C "$CLAUDE_HOME" rev-parse FETCH_HEAD &>/dev/null 2>&1; then
 
-        local _pull_paths=("settings.json" "CLAUDE.md" "agents" "skills" "hooks" "scripts" "rules")
-        local _pulled=0
-        for _p in "${_pull_paths[@]}"; do
-          if [[ ! -e "$CLAUDE_HOME/$_p" ]]; then
+        local _merge_whitelist=("settings.json" "CLAUDE.md" "agents" "skills" "hooks" "scripts" "rules" ".gitignore")
+        for _mi in "${_merge_whitelist[@]}"; do
+          [[ -e "$CLAUDE_HOME/$_mi" ]] && git -C "$CLAUDE_HOME" add "$CLAUDE_HOME/$_mi" 2>/dev/null || true
+        done
+
+        if ! git -C "$CLAUDE_HOME" diff --cached --quiet 2>/dev/null; then
+          # Commit local state so git has a reference point for the merge
+          git -C "$CLAUDE_HOME" commit -q -m "kitsync: local state before remote merge" 2>/dev/null
+
+          # Merge remote — -X theirs means repo wins on conflict
+          if git -C "$CLAUDE_HOME" merge FETCH_HEAD --allow-unrelated-histories -X theirs --no-edit -q 2>/dev/null; then
+            log_success "Remote config merged — repo files applied, local-only files preserved."
+          else
+            git -C "$CLAUDE_HOME" merge --abort 2>/dev/null || true
+            git -C "$CLAUDE_HOME" reset -q 2>/dev/null || true
+            log_warn "Merge failed — falling back to pull of missing files only."
+            local _pull_paths=("settings.json" "CLAUDE.md" "agents" "skills" "hooks" "scripts" "rules")
+            for _p in "${_pull_paths[@]}"; do
+              if [[ ! -e "$CLAUDE_HOME/$_p" ]]; then
+                git -C "$CLAUDE_HOME" checkout FETCH_HEAD -- "$_p" 2>/dev/null && \
+                  log_success "Pulled from remote: $_p" || true
+              fi
+            done
+          fi
+        else
+          # No local files — checkout whitelisted paths directly from remote
+          local _pull_paths=("settings.json" "CLAUDE.md" "agents" "skills" "hooks" "scripts" "rules")
+          local _pulled=0
+          for _p in "${_pull_paths[@]}"; do
             if git -C "$CLAUDE_HOME" checkout FETCH_HEAD -- "$_p" 2>/dev/null; then
               log_success "Pulled from remote: $_p"
               (( _pulled++ )) || true
             fi
-          fi
-        done
-
-        [[ $_pulled -eq 0 ]] && log_info "Remote config pulled — all items already present locally."
+          done
+          [[ $_pulled -eq 0 ]] && log_info "Remote config pulled — nothing found on remote."
+        fi
       else
         log_info "Remote is empty — nothing to pull."
       fi

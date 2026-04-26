@@ -14,18 +14,75 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Read version
-        id: version
-        run: echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+        with:
+          fetch-depth: 0
 
       - name: Create release tarball
         run: |
           tar -czf claude-kitsync-${{ github.ref_name }}.tar.gz \
             bin/ lib/ kit/ templates/ VERSION README.md install.sh
 
-      - name: Create GitHub Release
+      - name: Generate SHA256SUMS
+        run: |
+          sha256sum claude-kitsync-${{ github.ref_name }}.tar.gz > SHA256SUMS
+
+      - name: Import GPG key
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        run: echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+
+      - name: Sign release artifacts
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
+            --detach-sign --armor claude-kitsync-${{ github.ref_name }}.tar.gz
+          echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
+            --detach-sign --armor SHA256SUMS
+
+      - name: Create GitHub Release (with signatures)
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: claude-kitsync-${{ github.ref_name }}.tar.gz
+          files: |
+            claude-kitsync-${{ github.ref_name }}.tar.gz
+            claude-kitsync-${{ github.ref_name }}.tar.gz.asc
+            SHA256SUMS
+            SHA256SUMS.asc
+
+      - name: Create GitHub Release (without signatures)
+        if: ${{ secrets.GPG_PRIVATE_KEY == '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            claude-kitsync-${{ github.ref_name }}.tar.gz
+            SHA256SUMS
+
+      - name: Compute SHA256 of source archive for Homebrew
+        id: sha256
+        run: |
+          TAG=${{ github.ref_name }}
+          URL="https://github.com/charliinew/claude-kitsync/archive/refs/tags/${TAG}.tar.gz"
+          curl -fsSL "$URL" -o source-archive.tar.gz
+          SHA=$(sha256sum source-archive.tar.gz | awk '{print $1}')
+          echo "sha256=$SHA" >> $GITHUB_OUTPUT
+          echo "url=$URL" >> $GITHUB_OUTPUT
+
+      - name: Update Homebrew formula on main
+        run: |
+          TAG=${{ github.ref_name }}
+          SHA=${{ steps.sha256.outputs.sha256 }}
+          URL=${{ steps.sha256.outputs.url }}
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout main
+
+          sed -i "s|url \".*\"|url \"${URL}\"|" Formula/claude-kitsync.rb
+          sed -i "s|sha256 \".*\"|sha256 \"${SHA}\"|" Formula/claude-kitsync.rb
+
+          git add Formula/claude-kitsync.rb
+          git commit -m "chore(homebrew): update formula to ${TAG}"
+          git push origin main
