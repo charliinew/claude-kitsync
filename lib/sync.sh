@@ -37,7 +37,7 @@ _has_remote() {
 #
 # Strategy:
 #   1. Skip with warning if dirty working tree (never lose local changes)
-#   2. git pull --rebase --autostash -X ours -q
+#   2. git pull --rebase --autostash -X theirs -q (repo wins on conflict)
 #   3. On failure: abort rebase and warn
 #   4. Run normalize_paths after successful pull
 # ---------------------------------------------------------------------------
@@ -64,17 +64,35 @@ sync_pull() {
 
   log_step "Pulling from remote..."
 
-  # Step 2: rebase pull with autostash and ours strategy
-  if git -C "$CLAUDE_HOME" pull --rebase --autostash --allow-unrelated-histories -X ours -q 2>/dev/null; then
+  # Step 2: rebase pull with autostash and theirs strategy (repo wins on conflict)
+  local _pull_out
+  if _pull_out="$(git -C "$CLAUDE_HOME" pull --rebase --autostash --allow-unrelated-histories -X theirs 2>&1)"; then
     log_success "Pull complete."
     # Step 4: normalise absolute paths after pull
     normalize_paths
     paths_detokenize
   else
-    # Step 3: abort rebase on failure
-    log_warn "Pull/rebase failed — aborting rebase and restoring previous state."
+    # Step 3: show conflict details before aborting
+    log_warn "Pull/rebase failed — checking for conflicts..."
+
+    local _conflicts
+    _conflicts="$(git -C "$CLAUDE_HOME" diff --name-only --diff-filter=U 2>/dev/null)"
+    if [[ -n "$_conflicts" ]]; then
+      log_warn "Conflicting files:"
+      while IFS= read -r _f; do
+        log_warn "  • $_f"
+      done <<< "$_conflicts"
+    fi
+
+    if [[ -n "$_pull_out" ]]; then
+      log_warn "Git output:"
+      printf "%s\n" "$_pull_out" | grep -v "^$" | while IFS= read -r _line; do
+        log_warn "  $_line"
+      done
+    fi
+
     git -C "$CLAUDE_HOME" rebase --abort 2>/dev/null || true
-    log_warn "Your local state has been preserved. Check network/remote and retry."
+    log_warn "Local state restored. Check the files above and retry."
     return 1
   fi
 }

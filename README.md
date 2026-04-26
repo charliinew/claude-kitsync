@@ -28,6 +28,13 @@ KITSYNC_REMOTE=git@github.com:you/claude-config.git \
 
 No prompts — fully automated setup.
 
+**Via Homebrew:**
+
+```bash
+brew tap charliinew/claude-kitsync https://github.com/charliinew/claude-kitsync
+brew install claude-kitsync
+```
+
 ---
 
 ## Commands
