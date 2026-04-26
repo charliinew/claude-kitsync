@@ -62,6 +62,13 @@ sync_pull() {
     fi
   fi
 
+  # Ensure upstream tracking is set
+  local _branch
+  _branch="$(git -C "$CLAUDE_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+  if ! git -C "$CLAUDE_HOME" rev-parse --abbrev-ref --symbolic-full-name '@{u}' &>/dev/null 2>&1; then
+    git -C "$CLAUDE_HOME" branch --set-upstream-to="origin/$_branch" "$_branch" 2>/dev/null || true
+  fi
+
   log_step "Pulling from remote..."
 
   # Step 2: rebase pull with autostash and theirs strategy (repo wins on conflict)
