@@ -275,13 +275,15 @@ main() {
       ;;
     push)
       shift
-      local msg="${1:-}"
-      if [[ "$msg" == "-m" ]]; then
-        shift
-        msg="${1:-}"
-        shift || true
-      fi
-      sync_push "${msg:-}"
+      local msg="" _push_auto=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          -m)     shift; msg="${1:-}"; shift ;;
+          --auto) _push_auto="--auto"; shift ;;
+          *)      msg="$1"; shift ;;
+        esac
+      done
+      sync_push "${msg:-}" ${_push_auto}
       ;;
     pull)
       shift

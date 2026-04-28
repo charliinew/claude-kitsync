@@ -110,7 +110,21 @@ sync_pull() {
 # Safety check: aborts immediately if .credentials.json is staged.
 # ---------------------------------------------------------------------------
 sync_push() {
-  local commit_msg="${1:-kitsync: sync $(date '+%Y-%m-%d %H:%M')}"
+  local commit_msg=""
+  local _auto=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --auto) _auto=true; shift ;;
+      *)      commit_msg="$1"; shift ;;
+    esac
+  done
+  commit_msg="${commit_msg:-kitsync: sync $(date '+%Y-%m-%d %H:%M')}"
+
+  # In auto mode suppress info/step/success — only warnings and errors remain
+  _plog_step()    { [[ "$_auto" == false ]] && log_step "$@" || true; }
+  _plog_success() { [[ "$_auto" == false ]] && log_success "$@" || true; }
+  _plog_info()    { [[ "$_auto" == false ]] && log_info "$@" || true; }
 
   require_git_repo
 
@@ -134,7 +148,7 @@ sync_push() {
     exit 1
   fi
 
-  log_step "Staging whitelisted files..."
+  _plog_step "Staging whitelisted files..."
 
   # Stage only whitelisted paths (paths that exist)
   local staged_count=0
@@ -155,28 +169,30 @@ sync_push() {
 
   # Check if there is anything to commit
   if git -C "$CLAUDE_HOME" diff --cached --quiet 2>/dev/null; then
-    log_info "Nothing to commit — working tree clean."
+    _plog_info "Nothing to commit — working tree clean."
     return 0
   fi
 
-  log_step "Committing: $commit_msg"
+  _plog_step "Committing: $commit_msg"
   local _commit_out
   if _commit_out="$(git -C "$CLAUDE_HOME" commit -m "$commit_msg" 2>&1)"; then
-    printf "%s\n" "$_commit_out" | grep -Ev "^[[:space:]]+(create|delete) mode " || true
+    [[ "$_auto" == false ]] && \
+      printf "%s\n" "$_commit_out" | grep -Ev "^[[:space:]]+(create|delete) mode " || true
   else
     printf "%s\n" "$_commit_out" >&2
     exit 1
   fi
 
-  log_step "Pushing to remote..."
+  _plog_step "Pushing to remote..."
   local _branch
   _branch="$(git -C "$CLAUDE_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
   if ! git -C "$CLAUDE_HOME" push -q 2>/dev/null; then
     # No upstream set yet — set it and push
-    git -C "$CLAUDE_HOME" push -q -u origin "$_branch"
+    git -C "$CLAUDE_HOME" push -q -u origin "$_branch" 2>/dev/null || \
+      log_warn "Auto-push failed — run 'claude-kitsync push' to retry."
   fi
 
-  log_success "Push complete."
+  _plog_success "Push complete."
 }
 
 # ---------------------------------------------------------------------------

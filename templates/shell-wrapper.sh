@@ -57,14 +57,14 @@ claude() {
          sleep "${_ks_timer}m"
          [[ -f "$_ks_sentinel" ]] || break
          command -v claude-kitsync &>/dev/null && \
-           claude-kitsync push "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" 2>/dev/null || true
+           claude-kitsync push --auto "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" >/dev/null || true
        done) &!
     else
       (while [[ -f "$_ks_sentinel" ]]; do
          sleep "${_ks_timer}m"
          [[ -f "$_ks_sentinel" ]] || break
          command -v claude-kitsync &>/dev/null && \
-           claude-kitsync push "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" 2>/dev/null || true
+           claude-kitsync push --auto "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" >/dev/null || true
        done) &
       disown
     fi
@@ -81,10 +81,10 @@ claude() {
   if [[ "$_ks_is_repo" == true ]] && [[ "$_ks_push" == "end_of_session" ]]; then
     if [[ -n "${ZSH_VERSION:-}" ]]; then
       (command -v claude-kitsync &>/dev/null && \
-        claude-kitsync push "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" 2>/dev/null || true) &!
+        claude-kitsync push --auto "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" >/dev/null || true) &!
     else
       (command -v claude-kitsync &>/dev/null && \
-        claude-kitsync push "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" 2>/dev/null || true) &
+        claude-kitsync push --auto "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" >/dev/null || true) &
       disown
     fi
   fi
