@@ -32,6 +32,7 @@ source "$KITSYNC_ROOT/lib/sync.sh"
 source "$KITSYNC_ROOT/lib/wrapper.sh"
 source "$KITSYNC_ROOT/lib/init.sh"
 source "$KITSYNC_ROOT/lib/install-kit.sh"
+source "$KITSYNC_ROOT/lib/settings.sh"
 
 # ---------------------------------------------------------------------------
 # version
@@ -223,34 +224,6 @@ cmd_upgrade() {
     log_warn "Upgrade failed — check your network and try again."
     return 1
   fi
-}
-
-# ---------------------------------------------------------------------------
-# cmd_settings — interactively update sync preferences
-# ---------------------------------------------------------------------------
-cmd_settings() {
-  require_git_repo
-
-  local cfg="$CLAUDE_HOME/.kitsync/config"
-  if [[ -f "$cfg" ]]; then
-    local pull_mode push_mode push_timer
-    pull_mode="$(grep '^KITSYNC_PULL_MODE=' "$cfg" 2>/dev/null | cut -d= -f2- || echo auto)"
-    push_mode="$(grep '^KITSYNC_PUSH_MODE=' "$cfg" 2>/dev/null | cut -d= -f2- || echo end_of_session)"
-    push_timer="$(grep '^KITSYNC_PUSH_TIMER=' "$cfg" 2>/dev/null | cut -d= -f2- || echo 15)"
-    printf "\n"
-    log_info "Current sync preferences:"
-    log_info "  Pull:  $pull_mode"
-    if [[ "$push_mode" == "timer" ]]; then
-      log_info "  Push:  $push_mode (every ${push_timer}m)"
-    else
-      log_info "  Push:  $push_mode"
-    fi
-  fi
-
-  _prompt_sync_preferences
-  log_step "Updating shell wrapper..."
-  install_wrapper_auto
-  _print_reload_notice
 }
 
 # ---------------------------------------------------------------------------
