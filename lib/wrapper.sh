@@ -17,6 +17,10 @@ generate_wrapper() {
 # This block is managed by claude-kitsync — do not edit manually.
 # To update: run `claude-kitsync init` again or edit ~/.zshrc after this block.
 claude() {
+  # Suppress job PID/Done notifications for background sync ops.
+  # LOCAL_OPTIONS scopes the change to this function only (zsh restores on exit).
+  [[ -n "${ZSH_VERSION:-}" ]] && setopt LOCAL_OPTIONS NO_MONITOR NO_NOTIFY 2>/dev/null || true
+
   local _ks_home="${CLAUDE_HOME:-$HOME/.claude}"
   local _ks_cfg="$_ks_home/.kitsync/config"
 
