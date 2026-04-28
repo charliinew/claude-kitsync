@@ -190,10 +190,10 @@ run_test_ac11_install_sh_idempotent_if_exists() {
   marker_count="${marker_count:-0}"
   marker_count="$(echo "$marker_count" | tr -d '[:space:]')"
 
-  # We can't predict the exact count without knowing the final install.sh implementation,
-  # but we can verify it doesn't grow without bound (< 10 lines mentioning kitsync is safe)
+  # Verify block isn't duplicated. The wrapper now contains ~15 kitsync refs
+  # (pull/push/timer branches for zsh+bash). Cap at 30 — double that signals duplication.
   local ok=0
-  [[ "$marker_count" -lt 10 ]] || ok=1
+  [[ "$marker_count" -lt 30 ]] || ok=1
   assert_zero "$ok" \
     "AC11: install.sh double-run does not infinitely duplicate entries"
 }

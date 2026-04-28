@@ -34,28 +34,49 @@ claude() {
   local _ks_is_repo=false
   [[ -d "$_ks_home" ]] && git -C "$_ks_home" rev-parse --git-dir &>/dev/null 2>&1 && _ks_is_repo=true
 
+  # _ks_bg — launch subshell silently in background (no job notification)
+  # zsh: &! disowns atomically without printing PID; bash: & + disown
+  _ks_bg() {
+    if [[ -n "${ZSH_VERSION:-}" ]]; then
+      ("$@") &!
+    else
+      ("$@") &
+      disown
+    fi
+  }
+
   # Auto-pull on launch (background, non-blocking)
   if [[ "$_ks_is_repo" == true ]] && [[ "$_ks_pull" == "auto" ]]; then
-    (
-      timeout "${KITSYNC_TIMEOUT:-2}" git -C "$_ks_home" pull --rebase --autostash -q 2>/dev/null
-      command -v claude-kitsync &>/dev/null && claude-kitsync _post-pull-hook 2>/dev/null || true
-    ) &
-    disown
+    if [[ -n "${ZSH_VERSION:-}" ]]; then
+      (timeout "${KITSYNC_TIMEOUT:-2}" git -C "$_ks_home" pull --rebase --autostash -q 2>/dev/null
+       command -v claude-kitsync &>/dev/null && claude-kitsync _post-pull-hook 2>/dev/null || true) &!
+    else
+      (timeout "${KITSYNC_TIMEOUT:-2}" git -C "$_ks_home" pull --rebase --autostash -q 2>/dev/null
+       command -v claude-kitsync &>/dev/null && claude-kitsync _post-pull-hook 2>/dev/null || true) &
+      disown
+    fi
   fi
 
   # Timer-based push: sentinel file controls loop lifetime
   local _ks_sentinel=""
   if [[ "$_ks_is_repo" == true ]] && [[ "$_ks_push" == "timer" ]]; then
     _ks_sentinel="$(mktemp /tmp/kitsync-XXXX 2>/dev/null || true)"
-    (
-      while [[ -f "$_ks_sentinel" ]]; do
-        sleep "${_ks_timer}m"
-        [[ -f "$_ks_sentinel" ]] || break
-        command -v claude-kitsync &>/dev/null && \
-          claude-kitsync push "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" 2>/dev/null || true
-      done
-    ) &
-    disown
+    if [[ -n "${ZSH_VERSION:-}" ]]; then
+      (while [[ -f "$_ks_sentinel" ]]; do
+         sleep "${_ks_timer}m"
+         [[ -f "$_ks_sentinel" ]] || break
+         command -v claude-kitsync &>/dev/null && \
+           claude-kitsync push "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" 2>/dev/null || true
+       done) &!
+    else
+      (while [[ -f "$_ks_sentinel" ]]; do
+         sleep "${_ks_timer}m"
+         [[ -f "$_ks_sentinel" ]] || break
+         command -v claude-kitsync &>/dev/null && \
+           claude-kitsync push "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" 2>/dev/null || true
+       done) &
+      disown
+    fi
   fi
 
   # Run the real claude binary
@@ -67,13 +88,17 @@ claude() {
 
   # End-of-session push (background, non-blocking)
   if [[ "$_ks_is_repo" == true ]] && [[ "$_ks_push" == "end_of_session" ]]; then
-    (
-      command -v claude-kitsync &>/dev/null && \
-        claude-kitsync push "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" 2>/dev/null || true
-    ) &
-    disown
+    if [[ -n "${ZSH_VERSION:-}" ]]; then
+      (command -v claude-kitsync &>/dev/null && \
+        claude-kitsync push "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" 2>/dev/null || true) &!
+    else
+      (command -v claude-kitsync &>/dev/null && \
+        claude-kitsync push "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" 2>/dev/null || true) &
+      disown
+    fi
   fi
 
+  unset -f _ks_bg
   return $_ks_exit
 }
 # kitsync-end
