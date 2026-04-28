@@ -138,16 +138,21 @@ _inject_into_rc() {
     local tmp_file
     tmp_file="$(mktemp)"
 
-    # Use awk to replace the block between markers
+    # Write wrapper to a temp file so awk can read it via getline
+    # (awk -v doesn't support multi-line strings)
+    local new_block_file
+    new_block_file="$(mktemp)"
+    printf '%s\n' "$wrapper_text" > "$new_block_file"
+
     awk -v start="$WRAPPER_START_MARKER" -v end="$WRAPPER_END_MARKER" \
-        -v new_block="$wrapper_text" \
+        -v nbf="$new_block_file" \
     '
-    $0 == start { in_block=1; print new_block; next }
+    $0 == start { while ((getline line < nbf) > 0) print line; in_block=1; next }
     in_block && $0 == end { in_block=0; next }
     !in_block { print }
     ' "$rc_file" > "$tmp_file"
 
-    # Replace original with modified version
+    rm -f "$new_block_file"
     mv "$tmp_file" "$rc_file"
   else
     # No markers — append block at end of file
