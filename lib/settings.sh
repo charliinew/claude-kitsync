@@ -174,7 +174,16 @@ _settings_about() {
 cmd_settings() {
   require_git_repo
 
+  local _first=true
   while true; do
+    # After each iteration _select_menu leaves cursor at summary+1.
+    # Go back up 1 so the next menu overwrites the previous summary
+    # instead of drifting down. Skip on first iteration.
+    if [[ "$_first" == false ]]; then
+      printf "\033[1A" >/dev/tty 2>/dev/null || true
+    fi
+    _first=false
+
     local choice
     choice="$(_select_menu "claude-kitsync settings" \
       "Remote & Repository  — change sync target" \
