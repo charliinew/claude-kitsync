@@ -41,6 +41,24 @@ log_step() {
 }
 
 # ---------------------------------------------------------------------------
+# _print_reload_notice — prominent banner reminding user to reload their shell
+# ---------------------------------------------------------------------------
+_print_reload_notice() {
+  local shell_name
+  shell_name="$(basename "${SHELL:-zsh}")"
+  local rc_file=".${shell_name}rc"
+
+  printf "\n" >&2
+  printf "  ${_CLR_YELLOW}${_CLR_BOLD}┌─────────────────────────────────────────────────────┐${_CLR_RESET}\n" >&2
+  printf "  ${_CLR_YELLOW}${_CLR_BOLD}│  Reload your shell to activate the new wrapper      │${_CLR_RESET}\n" >&2
+  printf "  ${_CLR_YELLOW}${_CLR_BOLD}│                                                     │${_CLR_RESET}\n" >&2
+  printf "  ${_CLR_YELLOW}${_CLR_BOLD}│  ${_CLR_RESET}${_CLR_BOLD}source ~/%s${_CLR_RESET}${_CLR_YELLOW}${_CLR_BOLD}                              │${_CLR_RESET}\n" "$rc_file" >&2
+  printf "  ${_CLR_YELLOW}${_CLR_BOLD}│  ${_CLR_RESET}${_CLR_BOLD}or open a new terminal tab${_CLR_RESET}${_CLR_YELLOW}${_CLR_BOLD}                   │${_CLR_RESET}\n" >&2
+  printf "  ${_CLR_YELLOW}${_CLR_BOLD}└─────────────────────────────────────────────────────┘${_CLR_RESET}\n" >&2
+  printf "\n" >&2
+}
+
+# ---------------------------------------------------------------------------
 # require_git_repo — verifies that $CLAUDE_HOME is a git repository
 # Exits with error if not.
 # ---------------------------------------------------------------------------

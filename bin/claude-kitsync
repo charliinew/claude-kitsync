@@ -250,6 +250,7 @@ cmd_settings() {
   _prompt_sync_preferences
   log_step "Updating shell wrapper..."
   install_wrapper_auto
+  _print_reload_notice
 }
 
 # ---------------------------------------------------------------------------
