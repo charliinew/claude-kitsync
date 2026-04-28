@@ -248,6 +248,8 @@ cmd_settings() {
   fi
 
   _prompt_sync_preferences
+  log_step "Updating shell wrapper..."
+  install_wrapper_auto
 }
 
 # ---------------------------------------------------------------------------
