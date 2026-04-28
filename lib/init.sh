@@ -169,6 +169,57 @@ _prompt_remote_url() {
 }
 
 # ---------------------------------------------------------------------------
+# _prompt_sync_preferences — interactive selection of pull/push modes
+# Writes preferences to $CLAUDE_HOME/.kitsync/config
+# ---------------------------------------------------------------------------
+_prompt_sync_preferences() {
+  printf "\n"
+
+  # --- Pull mode ---
+  local pull_choice
+  pull_choice="$(_select_menu "Pull config from remote on each \`claude\` launch?" \
+    "Automatically  (pulls silently in background)" \
+    "On command only  (claude-kitsync pull)")"
+
+  local pull_mode="auto"
+  [[ "$pull_choice" == "2" ]] && pull_mode="manual"
+
+  # --- Push mode ---
+  local push_choice
+  push_choice="$(_select_menu "Push config changes to remote?" \
+    "End of session  (when claude exits)" \
+    "Timer  (every N minutes during session)" \
+    "On command only  (claude-kitsync push)" \
+    "Never  (read-only sync)")"
+
+  local push_mode="end_of_session"
+  local push_timer="15"
+
+  case "$push_choice" in
+    1) push_mode="end_of_session" ;;
+    2)
+      push_mode="timer"
+      push_timer="$(_read_tty "Push interval (minutes)" "15")"
+      [[ "$push_timer" =~ ^[0-9]+$ ]] || push_timer="15"
+      ;;
+    3) push_mode="manual" ;;
+    4) push_mode="never" ;;
+  esac
+
+  # Write config
+  mkdir -p "$CLAUDE_HOME/.kitsync"
+  cat > "$CLAUDE_HOME/.kitsync/config" <<CONFIG
+# claude-kitsync sync preferences
+# Edit manually or run: claude-kitsync settings
+KITSYNC_PULL_MODE=${pull_mode}
+KITSYNC_PUSH_MODE=${push_mode}
+KITSYNC_PUSH_TIMER=${push_timer}
+CONFIG
+
+  log_success "Sync preferences saved."
+}
+
+# ---------------------------------------------------------------------------
 # cmd_init — main entry point for `kitsync init`
 # Args: [--remote <url>]
 # ---------------------------------------------------------------------------
@@ -454,6 +505,11 @@ GITIGNORE
   else
     log_info "Nothing staged for initial commit."
   fi
+
+  # ---------------------------------------------------------------------------
+  # Step 5.5: Sync preferences
+  # ---------------------------------------------------------------------------
+  _prompt_sync_preferences
 
   # ---------------------------------------------------------------------------
   # Step 6: Install shell wrapper

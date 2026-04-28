@@ -57,6 +57,7 @@ _usage() {
     ${_CLR_CYAN}pull${_CLR_RESET} [--force]          Pull latest config from remote
     ${_CLR_CYAN}status${_CLR_RESET}                  Show modified files and ahead/behind count
     ${_CLR_CYAN}install${_CLR_RESET} <url>           Merge a public kit into ~/.claude
+    ${_CLR_CYAN}settings${_CLR_RESET}                Change sync preferences (pull/push mode)
     ${_CLR_CYAN}upgrade${_CLR_RESET}                 Update claude-kitsync to the latest version
     ${_CLR_CYAN}doctor${_CLR_RESET}                  Run health checks on your setup
     ${_CLR_CYAN}uninstall${_CLR_RESET}               Remove claude-kitsync completely
@@ -225,6 +226,31 @@ cmd_upgrade() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_settings — interactively update sync preferences
+# ---------------------------------------------------------------------------
+cmd_settings() {
+  require_git_repo
+
+  local cfg="$CLAUDE_HOME/.kitsync/config"
+  if [[ -f "$cfg" ]]; then
+    local pull_mode push_mode push_timer
+    pull_mode="$(grep '^KITSYNC_PULL_MODE=' "$cfg" 2>/dev/null | cut -d= -f2- || echo auto)"
+    push_mode="$(grep '^KITSYNC_PUSH_MODE=' "$cfg" 2>/dev/null | cut -d= -f2- || echo end_of_session)"
+    push_timer="$(grep '^KITSYNC_PUSH_TIMER=' "$cfg" 2>/dev/null | cut -d= -f2- || echo 15)"
+    printf "\n"
+    log_info "Current sync preferences:"
+    log_info "  Pull:  $pull_mode"
+    if [[ "$push_mode" == "timer" ]]; then
+      log_info "  Push:  $push_mode (every ${push_timer}m)"
+    else
+      log_info "  Push:  $push_mode"
+    fi
+  fi
+
+  _prompt_sync_preferences
+}
+
+# ---------------------------------------------------------------------------
 # _post_pull_hook — internal hook called by shell wrapper after background pull
 # Normalises paths in settings.json.
 # ---------------------------------------------------------------------------
@@ -265,6 +291,9 @@ main() {
     install)
       shift
       cmd_install "$@"
+      ;;
+    settings)
+      cmd_settings
       ;;
     doctor)
       cmd_doctor
