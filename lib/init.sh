@@ -557,9 +557,7 @@ GITIGNORE
     fi
   fi
 
-  printf "\n"
   log_success "claude-kitsync init complete!"
-  log_info "Reload your shell or run: source ~/.zshrc (or ~/.bashrc)"
-  log_info "Then invoke 'claude' normally — sync happens in the background."
-  printf "\n"
+  log_info "Invoke 'claude' normally — sync happens in the background."
+  _print_reload_notice
 }
