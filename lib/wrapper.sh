@@ -117,6 +117,32 @@ _render_wrapper() {
 }
 
 # ---------------------------------------------------------------------------
+# _backup_rc — snapshot a rc file into ~/.claude/.kitsync/backups/
+#
+# Keeps the 5 most recent backups per rc file. Silently skips if the
+# backup directory cannot be created (non-fatal).
+# ---------------------------------------------------------------------------
+_backup_rc() {
+  local rc_file="$1"
+  [[ -f "$rc_file" ]] || return 0
+
+  local backup_dir="${CLAUDE_HOME:-$HOME/.claude}/.kitsync/backups"
+  mkdir -p "$backup_dir" 2>/dev/null || return 0
+
+  local basename timestamp backup_path
+  basename="$(basename "$rc_file")"
+  timestamp="$(date '+%Y%m%dT%H%M%S')"
+  backup_path="$backup_dir/${basename}.${timestamp}.bak"
+
+  cp "$rc_file" "$backup_path" || return 0
+
+  # Prune: keep only the 5 most recent backups for this rc file
+  ls -t "$backup_dir/${basename}".*.bak 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+
+  log_info "Backed up $rc_file → $backup_path"
+}
+
+# ---------------------------------------------------------------------------
 # _inject_into_rc — idempotent injection of wrapper block into a rc file
 #
 # If markers already exist: replaces the block between them.
@@ -130,6 +156,8 @@ _inject_into_rc() {
     touch "$rc_file"
     log_info "Created $rc_file"
   fi
+
+  _backup_rc "$rc_file"
 
   local wrapper_text
   wrapper_text="$(_render_wrapper)"
@@ -179,6 +207,7 @@ _remove_from_rc() {
     return 0
   fi
 
+  _backup_rc "$rc_file"
   log_info "Removing kitsync block from $rc_file"
 
   local tmp_file
