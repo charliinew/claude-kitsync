@@ -107,6 +107,30 @@ sync_pull() {
 
   log_step "Pulling from remote..."
 
+  # Pre-fetch so we can warn about files that -X theirs would silently overwrite
+  if git -C "$CLAUDE_HOME" fetch origin -q 2>/dev/null; then
+    if git -C "$CLAUDE_HOME" rev-parse --verify "origin/$_branch" &>/dev/null; then
+      local _local_changed _remote_changed _would_overwrite
+      _local_changed="$(git -C "$CLAUDE_HOME" diff --name-only "origin/$_branch..HEAD" 2>/dev/null || true)"
+      _remote_changed="$(git -C "$CLAUDE_HOME" diff --name-only "HEAD..origin/$_branch" 2>/dev/null || true)"
+
+      if [[ -n "$_local_changed" ]] && [[ -n "$_remote_changed" ]]; then
+        _would_overwrite="$(comm -12 \
+          <(printf '%s\n' "$_local_changed" | sort) \
+          <(printf '%s\n' "$_remote_changed" | sort) || true)"
+
+        if [[ -n "$_would_overwrite" ]]; then
+          log_warn "Conflict detected — the following files changed both locally and on remote:"
+          while IFS= read -r _f; do
+            log_warn "  • $_f"
+          done <<< "$_would_overwrite"
+          log_warn "Remote version will be kept (-X theirs). Your local commits on these files will be overwritten."
+          printf "\n"
+        fi
+      fi
+    fi
+  fi
+
   # Step 2: rebase pull with autostash and theirs strategy (repo wins on conflict)
   local _pull_out
   if _pull_out="$(git -C "$CLAUDE_HOME" pull --rebase --autostash --allow-unrelated-histories -X theirs 2>&1)"; then
