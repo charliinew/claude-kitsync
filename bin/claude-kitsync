@@ -58,6 +58,7 @@ _usage() {
     ${_CLR_CYAN}pull${_CLR_RESET} [--force]               Pull latest config from remote
     ${_CLR_CYAN}status${_CLR_RESET}                       Show modified files and ahead/behind count
     ${_CLR_CYAN}log${_CLR_RESET} [-n <count>]             Show sync history (default: last 15 commits)
+    ${_CLR_CYAN}diff${_CLR_RESET}                         Show diff between local and remote
     ${_CLR_CYAN}install${_CLR_RESET} <url>           Merge a public kit into ~/.claude
     ${_CLR_CYAN}settings${_CLR_RESET}                Change sync preferences (pull/push mode)
     ${_CLR_CYAN}upgrade${_CLR_RESET}                 Update claude-kitsync to the latest version
@@ -272,6 +273,9 @@ main() {
     log)
       shift
       sync_log "${1:-15}"
+      ;;
+    diff)
+      sync_diff
       ;;
     install)
       shift
