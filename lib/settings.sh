@@ -169,6 +169,36 @@ _settings_wrapper() {
 }
 
 # ---------------------------------------------------------------------------
+# _settings_security — toggle encryption, show status
+# ---------------------------------------------------------------------------
+_settings_security() {
+  printf "\n" >&2
+  if _crypto_is_enabled 2>/dev/null; then
+    log_success "Encryption: enabled  (AES-256-CBC)"
+    local _kf; _kf="$(_crypto_key_path)"
+    [[ -f "$_kf" ]] && log_info "Key file: $_kf" || log_warn "Key file: MISSING"
+  else
+    log_info "Encryption: disabled"
+  fi
+
+  local choice
+  choice="$(_select_menu "Security & Encryption" \
+    "Enable encryption  — encrypt settings.json before push" \
+    "Disable encryption — commit settings.json in plaintext" \
+    "Rotate key         — generate a new encryption key" \
+    "Status" \
+    "Back")"
+
+  case "$choice" in
+    1) cmd_encrypt enable ;;
+    2) cmd_encrypt disable ;;
+    3) cmd_encrypt rotate ;;
+    4) cmd_encrypt status ;;
+    5) return 0 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # _settings_about — show current config, version, and run doctor
 # ---------------------------------------------------------------------------
 _settings_about() {
@@ -245,6 +275,7 @@ cmd_settings() {
     choice="$(_select_menu "claude-kitsync settings" \
       "Remote & Repository  — change sync target" \
       "Profiles             — manage work/perso remotes" \
+      "Security             — encryption for API keys" \
       "Sync timing          — pull / push modes" \
       "Shell wrapper        — reinstall or remove" \
       "Status & info        — config, version, doctor" \
@@ -253,10 +284,11 @@ cmd_settings() {
     case "$choice" in
       1) _settings_remote ;;
       2) _settings_profiles ;;
-      3) _settings_sync ;;
-      4) _settings_wrapper ;;
-      5) _settings_about ;;
-      6) break ;;
+      3) _settings_security ;;
+      4) _settings_sync ;;
+      5) _settings_wrapper ;;
+      6) _settings_about ;;
+      7) break ;;
     esac
   done
 }
