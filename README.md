@@ -42,11 +42,15 @@ brew install claude-kitsync
 | Command | Description |
 |---|---|
 | `claude-kitsync init [--remote <url>]` | Initialise `~/.claude` as git repo + install shell wrapper |
-| `claude-kitsync push [-m "message"]` | Commit and push whitelisted changes to remote |
+| `claude-kitsync push [-m "message"] [--dry-run]` | Commit and push whitelisted changes; `--dry-run` previews without committing |
 | `claude-kitsync pull [--force]` | Pull manually from remote (skips if dirty working tree) |
 | `claude-kitsync status` | Show modified files and ahead/behind count |
+| `claude-kitsync log [-n <count>]` | Show sync history (default: last 15 commits) |
+| `claude-kitsync restore` | Restore a rc file from a timestamped backup |
 | `claude-kitsync install <url>` | Merge a public kit into `~/.claude` (selective, no overwrite of local config) |
-| `claude-kitsync doctor` | Diagnose the health of your setup (5 checks) |
+| `claude-kitsync settings` | Interactive menu to change pull/push mode, remote URL, wrapper |
+| `claude-kitsync doctor` | Diagnose the health of your setup |
+| `claude-kitsync upgrade` | Update claude-kitsync to the latest version |
 | `claude-kitsync uninstall` | Fully remove claude-kitsync (binary, PATH, shell wrapper) |
 
 ---
