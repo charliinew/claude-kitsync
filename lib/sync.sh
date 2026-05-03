@@ -87,6 +87,9 @@ sync_pull() {
     return 0
   fi
 
+  # Clear any pending conflict notification — user is handling it explicitly
+  rm -f "$CLAUDE_HOME/.kitsync/conflict_pending" 2>/dev/null || true
+
   # Step 1: dirty tree check
   if _is_dirty; then
     if [[ "$force" == "--force" ]]; then
