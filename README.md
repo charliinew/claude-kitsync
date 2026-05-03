@@ -47,6 +47,7 @@ brew install claude-kitsync
 | `claude-kitsync status` | Show modified files and ahead/behind count |
 | `claude-kitsync log [-n <count>]` | Show sync history (default: last 15 commits) |
 | `claude-kitsync diff` | Show diff between local and remote before pushing |
+| `claude-kitsync publish` | Package and publish agents/skills as a kit to GitHub |
 | `claude-kitsync restore` | Restore a rc file from a timestamped backup |
 | `claude-kitsync install <url>` | Merge a public kit into `~/.claude` (selective, no overwrite of local config) |
 | `claude-kitsync settings` | Interactive menu to change pull/push mode, remote URL, wrapper |
