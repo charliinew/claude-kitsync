@@ -6,6 +6,7 @@
 
 # Config shareable
 !settings.json
+!settings.json.enc
 !CLAUDE.md
 
 # Répertoires synchronisés
@@ -25,6 +26,9 @@
 !.kitsync/
 !.kitsync/**
 !settings.template.json
+
+# Encryption key — never synced
+.kitsync/encryption.key
 
 # JAMAIS syncé (explicite) — these override the !*/ rule above
 .credentials.json

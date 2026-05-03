@@ -35,6 +35,7 @@ source "$KITSYNC_ROOT/lib/install-kit.sh"
 source "$KITSYNC_ROOT/lib/publish.sh"
 source "$KITSYNC_ROOT/lib/settings.sh"
 source "$KITSYNC_ROOT/lib/profiles.sh"
+source "$KITSYNC_ROOT/lib/crypto.sh"
 
 # ---------------------------------------------------------------------------
 # version
@@ -64,6 +65,7 @@ _usage() {
     ${_CLR_CYAN}publish${_CLR_RESET}                      Package and publish a kit to GitHub
     ${_CLR_CYAN}install${_CLR_RESET} <url>           Merge a public kit into ~/.claude
     ${_CLR_CYAN}profile${_CLR_RESET} [list|add|switch|remove]  Manage sync profiles (work, perso...)
+    ${_CLR_CYAN}encrypt${_CLR_RESET} [enable|disable|rotate|status]  Encrypt settings.json before push
     ${_CLR_CYAN}settings${_CLR_RESET}                Change sync preferences (pull/push mode)
     ${_CLR_CYAN}upgrade${_CLR_RESET}                 Update claude-kitsync to the latest version
     ${_CLR_CYAN}doctor${_CLR_RESET}                  Run health checks on your setup
@@ -143,16 +145,30 @@ cmd_doctor() {
     log_success "[4/6] No profiles configured (single-remote mode)"
   fi
 
-  # Check 5: .credentials.json is NOT tracked by git
+  # Check 5: Encryption key present if encryption is enabled
+  if _crypto_is_enabled 2>/dev/null; then
+    local _key_file; _key_file="$(_crypto_key_path)"
+    if [[ -f "$_key_file" ]]; then
+      log_success "[5/7] Encryption enabled — key file present"
+    else
+      log_error "[5/7] Encryption enabled but key file MISSING: $_key_file"
+      log_error "      Copy your key here or run: claude-kitsync encrypt enable (to generate a new one)"
+      errors=$((errors + 1))
+    fi
+  else
+    log_success "[5/7] Encryption: disabled (opt-in)"
+  fi
+
+  # Check 6: .credentials.json is NOT tracked by git
   if git -C "$CLAUDE_HOME" ls-files --error-unmatch ".credentials.json" &>/dev/null 2>&1; then
-    log_error "[5/6] CRITICAL: .credentials.json is tracked by git! Remove it immediately:"
+    log_error "[6/7] CRITICAL: .credentials.json is tracked by git! Remove it immediately:"
     log_error "      git -C \"$CLAUDE_HOME\" rm --cached .credentials.json"
     errors=$((errors + 1))
   else
-    log_success "[5/6] .credentials.json is NOT tracked (safe)"
+    log_success "[6/7] .credentials.json is NOT tracked (safe)"
   fi
 
-  # Check 6: Shell wrapper installed
+  # Check 7: Shell wrapper installed
   local wrapper_found=false
   local zshrc="${ZDOTDIR:-$HOME}/.zshrc"
   local bashrc="$HOME/.bashrc"
@@ -163,9 +179,9 @@ cmd_doctor() {
   fi
 
   if [[ "$wrapper_found" == "true" ]]; then
-    log_success "[6/6] Shell wrapper found in rc file(s)"
+    log_success "[7/7] Shell wrapper found in rc file(s)"
   else
-    log_warn "[6/6] Shell wrapper not found — run: claude-kitsync init"
+    log_warn "[7/7] Shell wrapper not found — run: claude-kitsync init"
     warnings=$((warnings + 1))
   fi
 
@@ -312,6 +328,10 @@ main() {
     profile)
       shift
       cmd_profile "$@"
+      ;;
+    encrypt)
+      shift
+      cmd_encrypt "$@"
       ;;
     settings)
       cmd_settings

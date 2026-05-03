@@ -56,6 +56,7 @@ _prompt_conflict_resolution() {
       }
       normalize_paths
       paths_detokenize
+      crypto_decrypt_all 2>/dev/null || true
       log_success "Pulled remote version — local state updated."
       ;;
     2)
@@ -141,6 +142,8 @@ sync_pull() {
     # Step 4: normalise absolute paths after pull
     normalize_paths
     paths_detokenize
+    # Step 5: decrypt encrypted files if encryption is enabled
+    crypto_decrypt_all 2>/dev/null || true
   else
     # Step 3: show conflict details, abort rebase, offer interactive resolution
     log_warn "Pull/rebase failed — checking for conflicts..."
@@ -249,12 +252,31 @@ sync_push() {
     return 0
   fi
 
+  # Encrypt sensitive files before staging (when enabled)
+  local _enc_staged_files=()
+  if _crypto_is_enabled 2>/dev/null; then
+    local _enc_out
+    while IFS= read -r _enc_out; do
+      [[ -n "$_enc_out" ]] && _enc_staged_files+=("$_enc_out")
+    done < <(crypto_encrypt_all 2>/dev/null || true)
+  fi
+
   _plog_step "Staging whitelisted files..."
 
   # Stage only whitelisted paths (paths that exist)
+  # When encryption is enabled, skip plaintext settings.json — stage .enc instead
   local staged_count=0
   for item in "${SYNC_WHITELIST[@]}"; do
     local full_path="$CLAUDE_HOME/$item"
+    # Skip plaintext file if its encrypted version was produced
+    if _crypto_is_enabled 2>/dev/null; then
+      local _enc_path="$CLAUDE_HOME/${item}.enc"
+      if [[ -f "$_enc_path" ]]; then
+        git -C "$CLAUDE_HOME" add "$_enc_path" 2>/dev/null || true
+        staged_count=$((staged_count + 1))
+        continue
+      fi
+    fi
     if [[ -e "$full_path" ]]; then
       git -C "$CLAUDE_HOME" add "$full_path" 2>/dev/null || true
       staged_count=$((staged_count + 1))

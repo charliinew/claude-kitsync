@@ -21,6 +21,7 @@ _claude_kitsync() {
         'publish[Package and publish a kit to GitHub]' \
         'install[Merge a public kit into ~/.claude]' \
         'profile[Manage sync profiles (work, perso...)]' \
+        'encrypt[Encrypt settings.json before push (AES-256)]' \
         'settings[Change sync preferences]' \
         'doctor[Run health checks on your setup]' \
         'restore[Restore a rc file from a kitsync backup]' \

@@ -4,7 +4,7 @@ _claude_kitsync() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  local commands="init push pull status log diff publish install profile settings doctor restore upgrade uninstall"
+  local commands="init push pull status log diff publish install profile encrypt settings doctor restore upgrade uninstall"
 
   if [[ $COMP_CWORD -eq 1 ]]; then
     COMPREPLY=($(compgen -W "$commands" -- "$cur"))
