@@ -117,6 +117,62 @@ _render_wrapper() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_restore — interactively restore a rc file from a kitsync backup
+# ---------------------------------------------------------------------------
+cmd_restore() {
+  local backup_dir="${CLAUDE_HOME:-$HOME/.claude}/.kitsync/backups"
+
+  if [[ ! -d "$backup_dir" ]]; then
+    log_error "No backup directory found: $backup_dir"
+    log_info  "Backups are created automatically when claude-kitsync modifies your rc file."
+    return 1
+  fi
+
+  local backups=()
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && backups+=("$f")
+  done < <(ls -t "$backup_dir"/*.bak 2>/dev/null || true)
+
+  if [[ ${#backups[@]} -eq 0 ]]; then
+    log_error "No backups found in $backup_dir"
+    return 1
+  fi
+
+  # Build human-readable labels: ".zshrc  —  2026-05-03 13:11:21"
+  local labels=()
+  for f in "${backups[@]}"; do
+    local bn stem ts_raw rc_name ts_fmt
+    bn="$(basename "$f")"          # .zshrc.20260503T131121.bak
+    stem="${bn%.bak}"              # .zshrc.20260503T131121
+    ts_raw="${stem##*.}"           # 20260503T131121
+    rc_name="${stem%.*}"           # .zshrc
+    ts_fmt="${ts_raw:0:4}-${ts_raw:4:2}-${ts_raw:6:2} ${ts_raw:9:2}:${ts_raw:11:2}:${ts_raw:13:2}"
+    labels+=("${rc_name}  —  ${ts_fmt}")
+  done
+
+  local idx
+  idx="$(_select_menu "Select a backup to restore" "${labels[@]}")"
+  local selected="${backups[$((idx - 1))]}"
+
+  # Derive target rc path from backup filename
+  local bn stem rc_name target_rc
+  bn="$(basename "$selected")"
+  stem="${bn%.bak}"
+  rc_name="${stem%.*}"
+  case "$rc_name" in
+    .zshrc)  target_rc="${ZDOTDIR:-$HOME}/.zshrc" ;;
+    .bashrc) target_rc="$HOME/.bashrc" ;;
+    *)       target_rc="$HOME/$rc_name" ;;
+  esac
+
+  log_info "Restoring $target_rc from $(basename "$selected")..."
+  _backup_rc "$target_rc"
+  cp "$selected" "$target_rc"
+  log_success "Restored: $target_rc"
+  log_info "Run 'source $target_rc' or open a new terminal to apply."
+}
+
+# ---------------------------------------------------------------------------
 # _backup_rc — snapshot a rc file into ~/.claude/.kitsync/backups/
 #
 # Keeps the 5 most recent backups per rc file. Silently skips if the

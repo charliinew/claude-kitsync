@@ -35,6 +35,7 @@ source "$_RUNNER_DIR/test_paths.sh"
 source "$_RUNNER_DIR/test_sync.sh"
 source "$_RUNNER_DIR/test_install_kit.sh"
 source "$_RUNNER_DIR/test_idempotent.sh"
+source "$_RUNNER_DIR/test_wrapper.sh"
 
 # ---------------------------------------------------------------------------
 # Determine which modules to run
@@ -52,6 +53,7 @@ case "$_FILTER" in
     run_sync_tests
     run_install_kit_tests
     run_idempotent_tests
+    run_wrapper_tests
     ;;
   gitignore)
     run_gitignore_tests
@@ -68,8 +70,11 @@ case "$_FILTER" in
   idempotent)
     run_idempotent_tests
     ;;
+  wrapper)
+    run_wrapper_tests
+    ;;
   *)
-    printf "Unknown filter '%s'. Valid: all, gitignore, paths, sync, install, idempotent\n" "$_FILTER" >&2
+    printf "Unknown filter '%s'. Valid: all, gitignore, paths, sync, install, idempotent, wrapper\n" "$_FILTER" >&2
     exit 1
     ;;
 esac

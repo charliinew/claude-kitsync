@@ -61,6 +61,7 @@ _usage() {
     ${_CLR_CYAN}settings${_CLR_RESET}                Change sync preferences (pull/push mode)
     ${_CLR_CYAN}upgrade${_CLR_RESET}                 Update claude-kitsync to the latest version
     ${_CLR_CYAN}doctor${_CLR_RESET}                  Run health checks on your setup
+    ${_CLR_CYAN}restore${_CLR_RESET}                 Restore a rc file from a kitsync backup
     ${_CLR_CYAN}uninstall${_CLR_RESET}               Remove claude-kitsync completely
 
   ${_CLR_BOLD}Options${_CLR_RESET}
@@ -275,6 +276,9 @@ main() {
       ;;
     doctor)
       cmd_doctor
+      ;;
+    restore)
+      cmd_restore
       ;;
     upgrade)
       cmd_upgrade
