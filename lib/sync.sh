@@ -33,6 +33,42 @@ _has_remote() {
 }
 
 # ---------------------------------------------------------------------------
+# _prompt_conflict_resolution — interactive menu after a failed pull/rebase
+# The rebase is aborted before this is called; repo is in a clean state.
+# ---------------------------------------------------------------------------
+_prompt_conflict_resolution() {
+  local _branch="$1"
+
+  printf "\n"
+  local choice
+  choice=$(_select_menu "How would you like to resolve?" \
+    "Accept remote — reset local to remote version" \
+    "Keep local — discard incoming changes" \
+    "Exit — I will resolve manually")
+
+  case "$choice" in
+    1)
+      log_step "Accepting remote version..."
+      git -C "$CLAUDE_HOME" fetch origin -q 2>/dev/null || true
+      git -C "$CLAUDE_HOME" reset --hard "origin/$_branch" 2>/dev/null || {
+        log_warn "Hard reset failed — try manually: git -C \"$CLAUDE_HOME\" reset --hard origin/$_branch"
+        return 1
+      }
+      normalize_paths
+      paths_detokenize
+      log_success "Pulled remote version — local state updated."
+      ;;
+    2)
+      log_info "Keeping local version — no changes applied."
+      ;;
+    3)
+      log_info "Exiting — repo is clean (rebase aborted)."
+      log_info "To inspect: cd \"$CLAUDE_HOME\" && git status"
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # sync_pull — pull latest changes from remote
 #
 # Strategy:
@@ -79,7 +115,7 @@ sync_pull() {
     normalize_paths
     paths_detokenize
   else
-    # Step 3: show conflict details before aborting
+    # Step 3: show conflict details, abort rebase, offer interactive resolution
     log_warn "Pull/rebase failed — checking for conflicts..."
 
     local _conflicts
@@ -99,8 +135,9 @@ sync_pull() {
     fi
 
     git -C "$CLAUDE_HOME" rebase --abort 2>/dev/null || true
-    log_warn "Local state restored. Check the files above and retry."
-    return 1
+    log_warn "Rebase aborted — local state restored."
+    _prompt_conflict_resolution "$_branch"
+    return $?
   fi
 }
 
@@ -246,6 +283,90 @@ sync_log() {
     --date=format:'%Y-%m-%d %H:%M'
 
   printf "\n\n"
+}
+
+# ---------------------------------------------------------------------------
+# sync_diff — fetch remote and show ahead/behind summary with interactive pager
+# ---------------------------------------------------------------------------
+sync_diff() {
+  require_git_repo
+
+  if ! _has_remote; then
+    log_warn "No remote configured — run: claude-kitsync settings"
+    return 1
+  fi
+
+  log_step "Fetching remote state..."
+  git -C "$CLAUDE_HOME" fetch origin -q 2>/dev/null || {
+    log_warn "Could not reach remote — check your connection."
+    return 1
+  }
+
+  local _branch
+  _branch="$(git -C "$CLAUDE_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+  local _remote="origin/$_branch"
+
+  if ! git -C "$CLAUDE_HOME" rev-parse --verify "$_remote" &>/dev/null; then
+    log_warn "Remote branch $_remote does not exist yet."
+    log_info "Push first: claude-kitsync push"
+    return 0
+  fi
+
+  local _ahead _behind
+  _ahead="$(git -C "$CLAUDE_HOME" rev-list --count "$_remote..HEAD" 2>/dev/null || echo 0)"
+  _behind="$(git -C "$CLAUDE_HOME" rev-list --count "HEAD..$_remote" 2>/dev/null || echo 0)"
+
+  printf "\n"
+  log_info "Diff — $CLAUDE_HOME  (branch: $_branch)\n"
+
+  if [[ "$_ahead" -eq 0 ]] && [[ "$_behind" -eq 0 ]]; then
+    log_success "Up to date with remote — nothing to diff."
+    printf "\n"
+    return 0
+  fi
+
+  printf "  %s ahead · %s behind\n\n" "$_ahead" "$_behind"
+
+  if [[ "$_ahead" -gt 0 ]]; then
+    local _s; [[ "$_ahead" -gt 1 ]] && _s="s" || _s=""
+    printf "%s  ↑ Outgoing (%s commit%s not yet pushed):%s\n" \
+      "$_CLR_YELLOW" "$_ahead" "$_s" "$_CLR_RESET"
+    git -C "$CLAUDE_HOME" log \
+      --pretty=format:"    %C(yellow)%h%Creset  %C(cyan)%ad%Creset  %s" \
+      --date=format:'%Y-%m-%d %H:%M' \
+      "$_remote..HEAD"
+    printf "\n\n"
+  fi
+
+  if [[ "$_behind" -gt 0 ]]; then
+    local _s; [[ "$_behind" -gt 1 ]] && _s="s" || _s=""
+    printf "%s  ↓ Incoming (%s commit%s from remote):%s\n" \
+      "$_CLR_CYAN" "$_behind" "$_s" "$_CLR_RESET"
+    git -C "$CLAUDE_HOME" log \
+      --pretty=format:"    %C(yellow)%h%Creset  %C(cyan)%ad%Creset  %s" \
+      --date=format:'%Y-%m-%d %H:%M' \
+      "HEAD..$_remote"
+    printf "\n\n"
+
+    local _stat
+    _stat="$(git -C "$CLAUDE_HOME" diff --stat "HEAD...$_remote" 2>/dev/null || true)"
+    if [[ -n "$_stat" ]]; then
+      printf "  Files changed (incoming):\n"
+      printf "%s\n\n" "$_stat" | sed 's/^/    /'
+    fi
+  fi
+
+  local choice
+  choice=$(_select_menu "View full diff?" \
+    "Incoming diff  (remote → local)" \
+    "Outgoing diff  (local → remote)" \
+    "Exit")
+
+  case "$choice" in
+    1) git -C "$CLAUDE_HOME" diff "HEAD...$_remote" 2>/dev/null | "${PAGER:-less}" -R ;;
+    2) git -C "$CLAUDE_HOME" diff "$_remote...HEAD" 2>/dev/null | "${PAGER:-less}" -R ;;
+    3) true ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------

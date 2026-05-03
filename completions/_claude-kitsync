@@ -17,6 +17,7 @@ _claude_kitsync() {
         'pull[Pull latest config from remote]' \
         'status[Show modified files and ahead/behind count]' \
         'log[Show sync history]' \
+        'diff[Show diff between local and remote]' \
         'install[Merge a public kit into ~/.claude]' \
         'settings[Change sync preferences]' \
         'doctor[Run health checks on your setup]' \
