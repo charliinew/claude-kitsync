@@ -512,27 +512,34 @@ GITIGNORE
   _prompt_sync_preferences
 
   # ---------------------------------------------------------------------------
-  # Step 5.7: Optional profile naming
-  # Only offered when a remote was configured during this init.
+  # Step 5.7: Profile naming
+  # Always offered when a remote was configured. Default is "default" when no
+  # profiles exist yet; naming is required when profiles already exist so the
+  # active profile stays consistent.
   # ---------------------------------------------------------------------------
   if [[ "${_INIT_REMOTE_MODE:-none}" != "none" ]] && \
      git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null 2>&1; then
-    local _name_profile_choice
-    _name_profile_choice="$(_select_menu "Name this remote as a profile?" \
-      "Yes  (recommended for multi-remote setups)" \
-      "No   (single-remote mode)")"
-    if [[ "$_name_profile_choice" == "1" ]]; then
-      local _init_profile_name
-      _init_profile_name="$(_read_tty "Profile name" "perso")"
-      if [[ -n "$_init_profile_name" ]] && [[ "$_init_profile_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-        local _init_remote_url
-        _init_remote_url="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || true)"
-        _profile_rewrite_config "$_init_profile_name" "$_init_profile_name" "$_init_remote_url"
-        log_success "Profile '$_init_profile_name' registered."
-      else
-        log_warn "Skipping profile — invalid name (only letters, digits, hyphens, underscores)."
-      fi
+    local _existing_profiles _profile_default _init_profile_name _init_remote_url
+    _existing_profiles="$(_profile_list_names 2>/dev/null || true)"
+    _profile_default="default"
+
+    if [[ -n "$_existing_profiles" ]]; then
+      log_info "Existing profiles: $(printf '%s' "$_existing_profiles" | tr '\n' ' ')"
+      log_info "You must name this remote to keep profiles consistent."
     fi
+
+    while true; do
+      _init_profile_name="$(_read_tty "Profile name for this remote" "$_profile_default")"
+      [[ -z "$_init_profile_name" ]] && _init_profile_name="$_profile_default"
+      if [[ "$_init_profile_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        break
+      fi
+      log_warn "Invalid name — only letters, digits, hyphens, underscores allowed."
+    done
+
+    _init_remote_url="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || true)"
+    _profile_rewrite_config "$_init_profile_name" "$_init_profile_name" "$_init_remote_url"
+    log_success "Profile '$_init_profile_name' registered."
   fi
 
   # ---------------------------------------------------------------------------
