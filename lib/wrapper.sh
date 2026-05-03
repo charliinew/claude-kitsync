@@ -49,16 +49,39 @@ claude() {
     fi
   }
 
+  # Show notification if a previous auto-pull left a conflict pending
+  local _ks_cf="$_ks_home/.kitsync/conflict_pending"
+  if [[ -f "$_ks_cf" ]]; then
+    printf "\n\033[33m⚠  kitsync: sync conflict pending\033[0m\n" >&2
+    local _ks_cf_files
+    _ks_cf_files="$(grep '^files:' "$_ks_cf" 2>/dev/null | cut -d: -f2-)"
+    [[ -n "$_ks_cf_files" ]] && printf "   Conflicting: %s\n" "$_ks_cf_files" >&2
+    printf "   Resolve now:   claude-kitsync pull\n" >&2
+    printf "   Accept remote: claude-kitsync pull --force\n\n" >&2
+  fi
+
   # Auto-pull on launch (background, non-blocking)
   if [[ "$_ks_is_repo" == true ]] && [[ "$_ks_pull" == "auto" ]]; then
+    _ks_auto_pull() {
+      local _h="$1" _cf="$1/.kitsync/conflict_pending"
+      if timeout "${KITSYNC_TIMEOUT:-2}" git -C "$_h" pull --rebase --autostash -q 2>/dev/null; then
+        rm -f "$_cf" 2>/dev/null || true
+        command -v claude-kitsync &>/dev/null && claude-kitsync _post-pull-hook 2>/dev/null || true
+      else
+        git -C "$_h" rebase --abort 2>/dev/null || true
+        local _files
+        _files="$(git -C "$_h" diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ',' | sed 's/,$//')"
+        mkdir -p "$_h/.kitsync" 2>/dev/null || true
+        printf 'files:%s\n' "$_files" > "$_cf"
+      fi
+    }
     if [[ -n "${ZSH_VERSION:-}" ]]; then
-      (timeout "${KITSYNC_TIMEOUT:-2}" git -C "$_ks_home" pull --rebase --autostash -q 2>/dev/null
-       command -v claude-kitsync &>/dev/null && claude-kitsync _post-pull-hook 2>/dev/null || true) &!
+      (_ks_auto_pull "$_ks_home") &!
     else
-      (timeout "${KITSYNC_TIMEOUT:-2}" git -C "$_ks_home" pull --rebase --autostash -q 2>/dev/null
-       command -v claude-kitsync &>/dev/null && claude-kitsync _post-pull-hook 2>/dev/null || true) &
+      (_ks_auto_pull "$_ks_home") &
       disown
     fi
+    unset -f _ks_auto_pull
   fi
 
   # Timer-based push: sentinel file controls loop lifetime
