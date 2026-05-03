@@ -1,0 +1,56 @@
+#compdef claude-kitsync
+
+_claude_kitsync() {
+  local line state
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '(-v --version)'{-v,--version}'[Show version]' \
+    '1: :->cmds' \
+    '*::arg:->args'
+
+  case "$state" in
+    cmds)
+      _values 'command' \
+        'init[Set up ~/.claude as a git repo and install shell wrapper]' \
+        'push[Commit and push config changes to remote]' \
+        'pull[Pull latest config from remote]' \
+        'status[Show modified files and ahead/behind count]' \
+        'log[Show sync history]' \
+        'install[Merge a public kit into ~/.claude]' \
+        'settings[Change sync preferences]' \
+        'doctor[Run health checks on your setup]' \
+        'restore[Restore a rc file from a kitsync backup]' \
+        'upgrade[Update claude-kitsync to the latest version]' \
+        'uninstall[Remove claude-kitsync completely]'
+      ;;
+    args)
+      case $line[1] in
+        init)
+          _arguments \
+            '--remote[Git remote URL]:url:' \
+          ;;
+        push)
+          _arguments \
+            '(-m)-m[Commit message]:message:' \
+            '--auto[Non-interactive mode, suppress output]' \
+            '(-n --dry-run)'{-n,--dry-run}'[Preview what would be committed without committing]' \
+          ;;
+        pull)
+          _arguments \
+            '--force[Pull even if working tree is dirty]' \
+          ;;
+        log)
+          _arguments \
+            '-n[Number of commits to show]:count:' \
+          ;;
+        install)
+          _arguments \
+            ':kit url:_urls' \
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_kitsync

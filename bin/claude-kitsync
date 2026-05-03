@@ -54,9 +54,10 @@ _usage() {
 
   ${_CLR_BOLD}Commands${_CLR_RESET}
     ${_CLR_CYAN}init${_CLR_RESET} [--remote <url>]   Set up ~/.claude as a git repo + shell wrapper
-    ${_CLR_CYAN}push${_CLR_RESET} [-m "message"]     Commit and push config changes to remote
-    ${_CLR_CYAN}pull${_CLR_RESET} [--force]          Pull latest config from remote
-    ${_CLR_CYAN}status${_CLR_RESET}                  Show modified files and ahead/behind count
+    ${_CLR_CYAN}push${_CLR_RESET} [-m "msg"] [--dry-run]  Commit and push config changes to remote
+    ${_CLR_CYAN}pull${_CLR_RESET} [--force]               Pull latest config from remote
+    ${_CLR_CYAN}status${_CLR_RESET}                       Show modified files and ahead/behind count
+    ${_CLR_CYAN}log${_CLR_RESET} [-n <count>]             Show sync history (default: last 15 commits)
     ${_CLR_CYAN}install${_CLR_RESET} <url>           Merge a public kit into ~/.claude
     ${_CLR_CYAN}settings${_CLR_RESET}                Change sync preferences (pull/push mode)
     ${_CLR_CYAN}upgrade${_CLR_RESET}                 Update claude-kitsync to the latest version
@@ -249,15 +250,16 @@ main() {
       ;;
     push)
       shift
-      local msg="" _push_auto=""
+      local msg="" _push_auto="" _push_dry_run=""
       while [[ $# -gt 0 ]]; do
         case "$1" in
-          -m)     shift; msg="${1:-}"; shift ;;
-          --auto) _push_auto="--auto"; shift ;;
-          *)      msg="$1"; shift ;;
+          -m)              shift; msg="${1:-}"; shift ;;
+          --auto)          _push_auto="--auto"; shift ;;
+          -n|--dry-run)    _push_dry_run="--dry-run"; shift ;;
+          *)               msg="$1"; shift ;;
         esac
       done
-      sync_push "${msg:-}" ${_push_auto}
+      sync_push "${msg:-}" ${_push_auto} ${_push_dry_run}
       ;;
     pull)
       shift
@@ -266,6 +268,10 @@ main() {
       ;;
     status)
       sync_status
+      ;;
+    log)
+      shift
+      sync_log "${1:-15}"
       ;;
     install)
       shift
