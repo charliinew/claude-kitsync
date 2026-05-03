@@ -18,6 +18,7 @@ _claude_kitsync() {
         'status[Show modified files and ahead/behind count]' \
         'log[Show sync history]' \
         'diff[Show diff between local and remote]' \
+        'publish[Package and publish a kit to GitHub]' \
         'install[Merge a public kit into ~/.claude]' \
         'settings[Change sync preferences]' \
         'doctor[Run health checks on your setup]' \
