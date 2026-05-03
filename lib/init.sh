@@ -512,6 +512,30 @@ GITIGNORE
   _prompt_sync_preferences
 
   # ---------------------------------------------------------------------------
+  # Step 5.7: Optional profile naming
+  # Only offered when a remote was configured during this init.
+  # ---------------------------------------------------------------------------
+  if [[ "${_INIT_REMOTE_MODE:-none}" != "none" ]] && \
+     git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null 2>&1; then
+    local _name_profile_choice
+    _name_profile_choice="$(_select_menu "Name this remote as a profile?" \
+      "Yes  (recommended for multi-remote setups)" \
+      "No   (single-remote mode)")"
+    if [[ "$_name_profile_choice" == "1" ]]; then
+      local _init_profile_name
+      _init_profile_name="$(_read_tty "Profile name" "perso")"
+      if [[ -n "$_init_profile_name" ]] && [[ "$_init_profile_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        local _init_remote_url
+        _init_remote_url="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || true)"
+        _profile_rewrite_config "$_init_profile_name" "$_init_profile_name" "$_init_remote_url"
+        log_success "Profile '$_init_profile_name' registered."
+      else
+        log_warn "Skipping profile — invalid name (only letters, digits, hyphens, underscores)."
+      fi
+    fi
+  fi
+
+  # ---------------------------------------------------------------------------
   # Step 6: Install shell wrapper
   # ---------------------------------------------------------------------------
   log_step "Installing shell wrapper..."

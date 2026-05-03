@@ -50,6 +50,7 @@ brew install claude-kitsync
 | `claude-kitsync publish` | Package and publish agents/skills as a kit to GitHub |
 | `claude-kitsync restore` | Restore a rc file from a timestamped backup |
 | `claude-kitsync install <url>` | Merge a public kit into `~/.claude` (selective, no overwrite of local config) |
+| `claude-kitsync profile [list\|add\|switch\|remove]` | Manage named remotes for multi-environment sync (work, perso…) |
 | `claude-kitsync settings` | Interactive menu to change pull/push mode, remote URL, wrapper |
 | `claude-kitsync doctor` | Diagnose the health of your setup |
 | `claude-kitsync upgrade` | Update claude-kitsync to the latest version |

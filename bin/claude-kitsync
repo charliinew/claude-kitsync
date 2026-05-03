@@ -34,6 +34,7 @@ source "$KITSYNC_ROOT/lib/init.sh"
 source "$KITSYNC_ROOT/lib/install-kit.sh"
 source "$KITSYNC_ROOT/lib/publish.sh"
 source "$KITSYNC_ROOT/lib/settings.sh"
+source "$KITSYNC_ROOT/lib/profiles.sh"
 
 # ---------------------------------------------------------------------------
 # version
@@ -62,6 +63,7 @@ _usage() {
     ${_CLR_CYAN}diff${_CLR_RESET}                         Show diff between local and remote
     ${_CLR_CYAN}publish${_CLR_RESET}                      Package and publish a kit to GitHub
     ${_CLR_CYAN}install${_CLR_RESET} <url>           Merge a public kit into ~/.claude
+    ${_CLR_CYAN}profile${_CLR_RESET} [list|add|switch|remove]  Manage sync profiles (work, perso...)
     ${_CLR_CYAN}settings${_CLR_RESET}                Change sync preferences (pull/push mode)
     ${_CLR_CYAN}upgrade${_CLR_RESET}                 Update claude-kitsync to the latest version
     ${_CLR_CYAN}doctor${_CLR_RESET}                  Run health checks on your setup
@@ -96,17 +98,17 @@ cmd_doctor() {
 
   # Check 1: CLAUDE_HOME exists
   if [[ -d "$CLAUDE_HOME" ]]; then
-    log_success "[1/5] CLAUDE_HOME exists: $CLAUDE_HOME"
+    log_success "[1/6] CLAUDE_HOME exists: $CLAUDE_HOME"
   else
-    log_error "[1/5] CLAUDE_HOME missing: $CLAUDE_HOME — run: claude-kitsync init"
+    log_error "[1/6] CLAUDE_HOME missing: $CLAUDE_HOME — run: claude-kitsync init"
     errors=$((errors + 1))
   fi
 
   # Check 2: Is a git repo
   if git -C "$CLAUDE_HOME" rev-parse --git-dir &>/dev/null 2>&1; then
-    log_success "[2/5] $CLAUDE_HOME is a git repository"
+    log_success "[2/6] $CLAUDE_HOME is a git repository"
   else
-    log_error "[2/5] Not a git repo — run: claude-kitsync init"
+    log_error "[2/6] Not a git repo — run: claude-kitsync init"
     errors=$((errors + 1))
   fi
 
@@ -114,22 +116,43 @@ cmd_doctor() {
   if git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null 2>&1; then
     local remote_url
     remote_url="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null)"
-    log_success "[3/5] Remote configured: $remote_url"
+    log_success "[3/6] Remote configured: $remote_url"
   else
-    log_warn "[3/5] No remote configured — run: git -C \"$CLAUDE_HOME\" remote add origin <url>"
+    log_warn "[3/6] No remote configured — run: git -C \"$CLAUDE_HOME\" remote add origin <url>"
     warnings=$((warnings + 1))
   fi
 
-  # Check 4: .credentials.json is NOT tracked by git
+  # Check 4: Profile consistency
+  local _active_profile
+  _active_profile="$(_profile_get_active 2>/dev/null || true)"
+  if [[ -n "$_active_profile" ]]; then
+    local _profile_url _origin_url
+    _profile_url="$(_profile_get_url "$_active_profile" 2>/dev/null || true)"
+    _origin_url="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || true)"
+    if [[ -n "$_profile_url" ]] && [[ "$_profile_url" == "$_origin_url" ]]; then
+      log_success "[4/6] Profile '$_active_profile' matches origin remote"
+    elif [[ -n "$_profile_url" ]] && [[ "$_profile_url" != "$_origin_url" ]]; then
+      log_warn "[4/6] Profile '$_active_profile' URL mismatch — config: $_profile_url  origin: $_origin_url"
+      log_warn "      Fix with: claude-kitsync profile switch $_active_profile"
+      warnings=$((warnings + 1))
+    else
+      log_warn "[4/6] Active profile '$_active_profile' not found in config"
+      warnings=$((warnings + 1))
+    fi
+  else
+    log_success "[4/6] No profiles configured (single-remote mode)"
+  fi
+
+  # Check 5: .credentials.json is NOT tracked by git
   if git -C "$CLAUDE_HOME" ls-files --error-unmatch ".credentials.json" &>/dev/null 2>&1; then
-    log_error "[4/5] CRITICAL: .credentials.json is tracked by git! Remove it immediately:"
+    log_error "[5/6] CRITICAL: .credentials.json is tracked by git! Remove it immediately:"
     log_error "      git -C \"$CLAUDE_HOME\" rm --cached .credentials.json"
     errors=$((errors + 1))
   else
-    log_success "[4/5] .credentials.json is NOT tracked (safe)"
+    log_success "[5/6] .credentials.json is NOT tracked (safe)"
   fi
 
-  # Check 5: Shell wrapper installed
+  # Check 6: Shell wrapper installed
   local wrapper_found=false
   local zshrc="${ZDOTDIR:-$HOME}/.zshrc"
   local bashrc="$HOME/.bashrc"
@@ -140,9 +163,9 @@ cmd_doctor() {
   fi
 
   if [[ "$wrapper_found" == "true" ]]; then
-    log_success "[5/5] Shell wrapper found in rc file(s)"
+    log_success "[6/6] Shell wrapper found in rc file(s)"
   else
-    log_warn "[5/5] Shell wrapper not found — run: claude-kitsync init"
+    log_warn "[6/6] Shell wrapper not found — run: claude-kitsync init"
     warnings=$((warnings + 1))
   fi
 
@@ -285,6 +308,10 @@ main() {
     install)
       shift
       cmd_install "$@"
+      ;;
+    profile)
+      shift
+      cmd_profile "$@"
       ;;
     settings)
       cmd_settings

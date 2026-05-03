@@ -20,6 +20,7 @@ _claude_kitsync() {
         'diff[Show diff between local and remote]' \
         'publish[Package and publish a kit to GitHub]' \
         'install[Merge a public kit into ~/.claude]' \
+        'profile[Manage sync profiles (work, perso...)]' \
         'settings[Change sync preferences]' \
         'doctor[Run health checks on your setup]' \
         'restore[Restore a rc file from a kitsync backup]' \
