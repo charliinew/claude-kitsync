@@ -235,7 +235,14 @@ sync_push() {
         done
       printf "\n"
       log_info "Commit message: kitsync: sync $(date '+%Y-%m-%d %H:%M')"
-      log_info "Would push to:  $(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || echo 'no remote')"
+      local _dryrun_url _dryrun_profile
+      _dryrun_url="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || echo 'no remote')"
+      _dryrun_profile="$(_profile_get_active 2>/dev/null || true)"
+      if [[ -n "$_dryrun_profile" ]]; then
+        log_info "Would push to:  $_dryrun_url  (profile: $_dryrun_profile)"
+      else
+        log_info "Would push to:  $_dryrun_url"
+      fi
     fi
     git -C "$CLAUDE_HOME" reset HEAD -- . 2>/dev/null || true
     printf "\n"
@@ -408,6 +415,11 @@ sync_status() {
   printf "\n"
   log_info "Repository: $CLAUDE_HOME"
   log_info "Branch:     $branch"
+  local _status_profile
+  _status_profile="$(_profile_get_active 2>/dev/null || true)"
+  if [[ -n "$_status_profile" ]]; then
+    log_info "Profile:    $_status_profile"
+  fi
   printf "\n"
 
   local status_output

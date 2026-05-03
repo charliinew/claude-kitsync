@@ -59,6 +59,57 @@ _settings_remote() {
 }
 
 # ---------------------------------------------------------------------------
+# _settings_profiles — manage named sync profiles
+# ---------------------------------------------------------------------------
+_settings_profiles() {
+  local current_active
+  current_active="$(_profile_get_active)"
+
+  printf "\n" >&2
+  if [[ -n "$current_active" ]]; then
+    local current_url
+    current_url="$(_profile_get_url "$current_active")"
+    log_info "Active profile: $current_active  ($current_url)"
+  else
+    log_info "Active profile: none  (single-remote mode)"
+  fi
+
+  local choice
+  choice="$(_select_menu "Profiles — manage work/perso remotes" \
+    "List profiles" \
+    "Add a profile" \
+    "Switch profile" \
+    "Remove a profile" \
+    "Back")"
+
+  case "$choice" in
+    1) _profile_list_all_display ;;
+    2) _profile_add ;;
+    3)
+      local names_list
+      names_list="$(_profile_list_names)"
+      if [[ -z "$names_list" ]]; then
+        log_warn "No profiles configured. Add one first."
+        return 0
+      fi
+      local options=()
+      while IFS= read -r n; do
+        [[ -n "$n" ]] && options+=("$n")
+      done <<< "$names_list"
+      options+=("Back")
+      local sw_choice
+      sw_choice="$(_select_menu "Switch to profile:" "${options[@]}")"
+      local idx=$(( sw_choice - 1 ))
+      if [[ "${options[$idx]}" != "Back" ]]; then
+        _profile_switch "${options[$idx]}"
+      fi
+      ;;
+    4) _profile_remove ;;
+    5) return 0 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # _settings_sync — pull/push timing preferences
 # ---------------------------------------------------------------------------
 _settings_sync() {
@@ -136,6 +187,12 @@ _settings_about() {
       remote="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || echo '(none)')"
       log_info "Remote:      $remote"
 
+      local _active_prof
+      _active_prof="$(_profile_get_active)"
+      if [[ -n "$_active_prof" ]]; then
+        log_info "Profile:     $_active_prof"
+      fi
+
       local cfg="$CLAUDE_HOME/.kitsync/config"
       if [[ -f "$cfg" ]]; then
         local pull_mode push_mode push_timer
@@ -187,6 +244,7 @@ cmd_settings() {
     local choice
     choice="$(_select_menu "claude-kitsync settings" \
       "Remote & Repository  — change sync target" \
+      "Profiles             — manage work/perso remotes" \
       "Sync timing          — pull / push modes" \
       "Shell wrapper        — reinstall or remove" \
       "Status & info        — config, version, doctor" \
@@ -194,10 +252,11 @@ cmd_settings() {
 
     case "$choice" in
       1) _settings_remote ;;
-      2) _settings_sync ;;
-      3) _settings_wrapper ;;
-      4) _settings_about ;;
-      5) break ;;
+      2) _settings_profiles ;;
+      3) _settings_sync ;;
+      4) _settings_wrapper ;;
+      5) _settings_about ;;
+      6) break ;;
     esac
   done
 }
