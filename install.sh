@@ -308,6 +308,33 @@ fi
 _ok "Binary ready at $kitsync_dest"
 
 # ---------------------------------------------------------------------------
+# Step 3b: Install shell completions (non-fatal if it fails)
+# ---------------------------------------------------------------------------
+local comp_dir="$install_dir/completions"
+if [[ -d "$comp_dir" ]]; then
+  local zsh_comp_dest=""
+  if command -v brew &>/dev/null 2>&1; then
+    zsh_comp_dest="$(brew --prefix 2>/dev/null)/share/zsh/site-functions/_claude-kitsync"
+  else
+    zsh_comp_dest="${ZDOTDIR:-$HOME}/.zsh/completions/_claude-kitsync"
+    mkdir -p "$(dirname "$zsh_comp_dest")" 2>/dev/null || true
+  fi
+  if [[ -n "$zsh_comp_dest" ]] && [[ -f "$comp_dir/_claude-kitsync" ]]; then
+    ln -sf "$comp_dir/_claude-kitsync" "$zsh_comp_dest" 2>/dev/null && \
+      _ok "Zsh completion installed" || _warn "Could not install zsh completion (non-fatal)"
+  fi
+
+  if command -v brew &>/dev/null 2>&1; then
+    local bash_comp_dest
+    bash_comp_dest="$(brew --prefix 2>/dev/null)/etc/bash_completion.d/claude-kitsync"
+    if [[ -f "$comp_dir/claude-kitsync.bash" ]]; then
+      ln -sf "$comp_dir/claude-kitsync.bash" "$bash_comp_dest" 2>/dev/null && \
+        _ok "Bash completion installed" || _warn "Could not install bash completion (non-fatal)"
+    fi
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Step 4: Inject PATH into shell rc (idempotent)
 # ---------------------------------------------------------------------------
 local current_shell rc_file=""

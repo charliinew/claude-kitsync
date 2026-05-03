@@ -112,11 +112,13 @@ sync_pull() {
 sync_push() {
   local commit_msg=""
   local _auto=false
+  local _dry_run=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --auto) _auto=true; shift ;;
-      *)      commit_msg="$1"; shift ;;
+      --auto)       _auto=true;     shift ;;
+      --dry-run|-n) _dry_run=true;  shift ;;
+      *)            commit_msg="$1"; shift ;;
     esac
   done
   commit_msg="${commit_msg:-kitsync: sync $(date '+%Y-%m-%d %H:%M')}"
@@ -146,6 +148,34 @@ sync_push() {
     log_error "CRITICAL: .credentials.json appears in git status!"
     log_error "This file must never be committed. Add it to .gitignore first."
     exit 1
+  fi
+
+  # Dry-run: stage → preview → reset → exit
+  if [[ "$_dry_run" == true ]]; then
+    log_step "Dry run — showing what would be committed\n"
+    for item in "${SYNC_WHITELIST[@]}"; do
+      local _fp="$CLAUDE_HOME/$item"
+      [[ -e "$_fp" ]] && git -C "$CLAUDE_HOME" add "$_fp" 2>/dev/null || true
+    done
+    if git -C "$CLAUDE_HOME" diff --cached --quiet 2>/dev/null; then
+      log_info "Nothing to commit — working tree clean for synced files."
+    else
+      git -C "$CLAUDE_HOME" diff --cached --name-status 2>/dev/null | \
+        while IFS=$'\t' read -r _st _file; do
+          case "$_st" in
+            M) log_info "  modified:  $_file" ;;
+            A) log_info "  new file:  $_file" ;;
+            D) log_info "  deleted:   $_file" ;;
+            *) log_info "  $_st         $_file" ;;
+          esac
+        done
+      printf "\n"
+      log_info "Commit message: kitsync: sync $(date '+%Y-%m-%d %H:%M')"
+      log_info "Would push to:  $(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || echo 'no remote')"
+    fi
+    git -C "$CLAUDE_HOME" reset HEAD -- . 2>/dev/null || true
+    printf "\n"
+    return 0
   fi
 
   _plog_step "Staging whitelisted files..."
@@ -193,6 +223,29 @@ sync_push() {
   fi
 
   _plog_success "Push complete."
+}
+
+# ---------------------------------------------------------------------------
+# sync_log — show formatted git log of $CLAUDE_HOME
+# ---------------------------------------------------------------------------
+sync_log() {
+  require_git_repo
+  local count="${1:-15}"
+  [[ "$count" =~ ^[0-9]+$ ]] || count=15
+
+  printf "\n"
+  log_info "Sync history — $CLAUDE_HOME\n"
+
+  if ! git -C "$CLAUDE_HOME" log -1 --oneline &>/dev/null 2>&1; then
+    log_warn "No commits yet."
+    return 0
+  fi
+
+  git -C "$CLAUDE_HOME" log -n "$count" \
+    --pretty=format:"%C(yellow)%h%Creset  %C(cyan)%ad%Creset  %s" \
+    --date=format:'%Y-%m-%d %H:%M'
+
+  printf "\n\n"
 }
 
 # ---------------------------------------------------------------------------
