@@ -39,6 +39,7 @@ claude() {
   # zsh: &! disowns atomically without printing PID; bash: & + disown
   if [[ "$_ks_is_repo" == true ]] && [[ "$_ks_pull" == "auto" ]]; then
     if [[ -n "${ZSH_VERSION:-}" ]]; then
+      # shellcheck disable=SC1073,SC1035,SC1072
       (timeout "${KITSYNC_TIMEOUT:-2}" git -C "$_ks_home" pull --rebase --autostash -q 2>/dev/null
        command -v claude-kitsync &>/dev/null && claude-kitsync _post-pull-hook 2>/dev/null || true) &!
     else
