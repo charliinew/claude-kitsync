@@ -64,9 +64,14 @@ normalize_paths() {
 }
 
 # ---------------------------------------------------------------------------
-# paths_tokenize — before push, replace $HOME/.claude with __CLAUDE_HOME__
-# in settings.json so that the repo remains portable across users.
-# This is the inverse of normalize_paths.
+# paths_tokenize — before push, replace user-specific paths in settings.json
+# with portable tokens so the repo works across machines and usernames.
+#
+#   $HOME/.claude  →  __CLAUDE_HOME__
+#   $HOME          →  __HOME__          (covers .bun, .local, etc.)
+#
+# Order matters: replace longer prefix first to avoid double-substitution.
+# This is the inverse of paths_detokenize.
 # ---------------------------------------------------------------------------
 paths_tokenize() {
   local settings_file="$CLAUDE_HOME/settings.json"
@@ -74,22 +79,28 @@ paths_tokenize() {
     return 0
   fi
 
-  # Escape HOME for use in sed replacement
+  # Escape HOME for use as a sed pattern (handles /Users/foo with special chars)
   local escaped_home
   escaped_home="$(printf '%s' "$HOME" | sed 's|[.[\*^$/\\]|\\&|g')"
 
-  local pattern="s|${escaped_home}/\\.claude|__CLAUDE_HOME__|g"
+  local pattern_claude_home="s|${escaped_home}/\\.claude|__CLAUDE_HOME__|g"
+  local pattern_home="s|${escaped_home}|__HOME__|g"
 
   if is_macos; then
-    sed -i '' "$pattern" "$settings_file" 2>/dev/null || true
+    sed -i '' "$pattern_claude_home" "$settings_file" 2>/dev/null || true
+    sed -i '' "$pattern_home"        "$settings_file" 2>/dev/null || true
   else
-    sed -i "$pattern" "$settings_file" 2>/dev/null || true
+    sed -i "$pattern_claude_home" "$settings_file" 2>/dev/null || true
+    sed -i "$pattern_home"        "$settings_file" 2>/dev/null || true
   fi
 }
 
 # ---------------------------------------------------------------------------
-# paths_detokenize — replace __CLAUDE_HOME__ back to $HOME/.claude
-# Called after pull, as a fallback if normalize_paths regex misses tokens.
+# paths_detokenize — replace portable tokens back to absolute paths.
+# Called after pull so the local settings.json uses the current user's paths.
+#
+#   __CLAUDE_HOME__  →  $HOME/.claude
+#   __HOME__         →  $HOME
 # ---------------------------------------------------------------------------
 paths_detokenize() {
   local settings_file="$CLAUDE_HOME/settings.json"
@@ -97,17 +108,20 @@ paths_detokenize() {
     return 0
   fi
 
-  local escaped_target
-  escaped_target="${HOME}/.claude"
-  # Escape for sed replacement
-  local escaped_repl
-  escaped_repl="$(printf '%s' "$escaped_target" | sed 's|[&\\|]|\\&|g')"
+  # Escape replacements for sed (& and \ are metacharacters in replacement side)
+  local repl_claude_home repl_home
+  repl_claude_home="$(printf '%s' "${HOME}/.claude" | sed 's|[&\\|]|\\&|g')"
+  repl_home="$(printf '%s' "${HOME}"        | sed 's|[&\\|]|\\&|g')"
 
-  local pattern="s|__CLAUDE_HOME__|${escaped_repl}|g"
+  # Order matters: replace longer token first to avoid partial substitution
+  local pattern_claude_home="s|__CLAUDE_HOME__|${repl_claude_home}|g"
+  local pattern_home="s|__HOME__|${repl_home}|g"
 
   if is_macos; then
-    sed -i '' "$pattern" "$settings_file" 2>/dev/null || true
+    sed -i '' "$pattern_claude_home" "$settings_file" 2>/dev/null || true
+    sed -i '' "$pattern_home"        "$settings_file" 2>/dev/null || true
   else
-    sed -i "$pattern" "$settings_file" 2>/dev/null || true
+    sed -i "$pattern_claude_home" "$settings_file" 2>/dev/null || true
+    sed -i "$pattern_home"        "$settings_file" 2>/dev/null || true
   fi
 }

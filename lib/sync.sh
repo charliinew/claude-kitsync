@@ -261,6 +261,11 @@ sync_push() {
     done < <(crypto_encrypt_all 2>/dev/null || true)
   fi
 
+  # Tokenize portable paths in settings.json before committing so the repo
+  # is portable across machines and usernames ($HOME/.claude → __CLAUDE_HOME__,
+  # $HOME → __HOME__). paths_detokenize restores local state after push.
+  paths_tokenize 2>/dev/null || true
+
   _plog_step "Staging whitelisted files..."
 
   # Stage only whitelisted paths (paths that exist)
@@ -287,11 +292,13 @@ sync_push() {
   if git -C "$CLAUDE_HOME" diff --cached --name-only 2>/dev/null | grep -q "^\.credentials\.json$"; then
     log_error "CRITICAL: .credentials.json ended up staged — aborting commit!"
     git -C "$CLAUDE_HOME" reset HEAD ".credentials.json" 2>/dev/null || true
+    paths_detokenize 2>/dev/null || true
     exit 1
   fi
 
   # Check if there is anything to commit
   if git -C "$CLAUDE_HOME" diff --cached --quiet 2>/dev/null; then
+    paths_detokenize 2>/dev/null || true
     _plog_info "Nothing to commit — working tree clean."
     return 0
   fi
@@ -302,6 +309,7 @@ sync_push() {
     [[ "$_auto" == false ]] && \
       printf "%s\n" "$_commit_out" | grep -Ev "^[[:space:]]+(create|delete) mode " || true
   else
+    paths_detokenize 2>/dev/null || true
     printf "%s\n" "$_commit_out" >&2
     exit 1
   fi
@@ -314,6 +322,9 @@ sync_push() {
     git -C "$CLAUDE_HOME" push -q -u origin "$_branch" 2>/dev/null || \
       log_warn "Auto-push failed — run 'claude-kitsync push' to retry."
   fi
+
+  # Restore absolute paths locally — tokens are only for the git repo
+  paths_detokenize 2>/dev/null || true
 
   _plog_success "Push complete."
 }

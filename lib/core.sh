@@ -52,8 +52,8 @@ _print_reload_notice() {
   printf "  ${_CLR_YELLOW}${_CLR_BOLD}┌─────────────────────────────────────────────────────┐${_CLR_RESET}\n" >&2
   printf "  ${_CLR_YELLOW}${_CLR_BOLD}│  Reload your shell to activate the new wrapper      │${_CLR_RESET}\n" >&2
   printf "  ${_CLR_YELLOW}${_CLR_BOLD}│                                                     │${_CLR_RESET}\n" >&2
-  printf "  ${_CLR_YELLOW}${_CLR_BOLD}│  ${_CLR_RESET}${_CLR_BOLD}source ~/%s${_CLR_RESET}${_CLR_YELLOW}${_CLR_BOLD}                              │${_CLR_RESET}\n" "$rc_file" >&2
-  printf "  ${_CLR_YELLOW}${_CLR_BOLD}│  ${_CLR_RESET}${_CLR_BOLD}or open a new terminal tab${_CLR_RESET}${_CLR_YELLOW}${_CLR_BOLD}                   │${_CLR_RESET}\n" >&2
+  printf "  ${_CLR_YELLOW}${_CLR_BOLD}│  ${_CLR_RESET}${_CLR_BOLD}source ~/%s${_CLR_RESET}${_CLR_YELLOW}${_CLR_BOLD}                                    │${_CLR_RESET}\n" "$rc_file" >&2
+  printf "  ${_CLR_YELLOW}${_CLR_BOLD}│  ${_CLR_RESET}${_CLR_BOLD}or open a new terminal tab${_CLR_RESET}${_CLR_YELLOW}${_CLR_BOLD}                         │${_CLR_RESET}\n" >&2
   printf "  ${_CLR_YELLOW}${_CLR_BOLD}└─────────────────────────────────────────────────────┘${_CLR_RESET}\n" >&2
   printf "\n" >&2
 }

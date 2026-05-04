@@ -60,12 +60,28 @@ claude() {
     printf "   Accept remote: claude-kitsync pull --force\n\n" >&2
   fi
 
+  # Display pending notice from previous session's pull (before launching Claude)
+  local _ks_notice="$_ks_home/.kitsync/pending-notice"
+  if [[ -f "$_ks_notice" ]]; then
+    printf '\n\033[1;33m[kitsync]\033[0m  Config updated from remote — settings or agents may have changed.\n\n' >&2
+    rm -f "$_ks_notice" 2>/dev/null || true
+  fi
+
   # Auto-pull on launch (background, non-blocking)
+  # SHA comparison detects new commits → writes pending-notice for next launch.
   if [[ "$_ks_is_repo" == true ]] && [[ "$_ks_pull" == "auto" ]]; then
     _ks_auto_pull() {
       local _h="$1" _cf="$1/.kitsync/conflict_pending"
+      local _sha_b
+      _sha_b="$(git -C "$_h" rev-parse HEAD 2>/dev/null || true)"
       if timeout "${KITSYNC_TIMEOUT:-2}" git -C "$_h" pull --rebase --autostash -q 2>/dev/null; then
         rm -f "$_cf" 2>/dev/null || true
+        local _sha_a
+        _sha_a="$(git -C "$_h" rev-parse HEAD 2>/dev/null || true)"
+        if [[ -n "$_sha_b" ]] && [[ "$_sha_b" != "$_sha_a" ]]; then
+          mkdir -p "$_h/.kitsync" 2>/dev/null || true
+          printf 'updated\n' > "$_h/.kitsync/pending-notice" 2>/dev/null || true
+        fi
         command -v claude-kitsync &>/dev/null && claude-kitsync _post-pull-hook 2>/dev/null || true
       else
         git -C "$_h" rebase --abort 2>/dev/null || true
