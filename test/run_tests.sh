@@ -37,6 +37,11 @@ source "$_RUNNER_DIR/test_install_kit.sh"
 source "$_RUNNER_DIR/test_idempotent.sh"
 source "$_RUNNER_DIR/test_wrapper.sh"
 
+# Some sourced lib files (lib/core.sh, lib/wrapper.sh) call set -euo pipefail,
+# which activates -e in this shell. Re-disable it — the runner intentionally
+# has no -e so that test functions can return non-zero without aborting the run.
+set +e
+
 # ---------------------------------------------------------------------------
 # Determine which modules to run
 # ---------------------------------------------------------------------------
