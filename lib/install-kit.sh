@@ -2,6 +2,10 @@
 # lib/install-kit.sh — `kitsync install <url>` — clone a public kit and merge into ~/.claude
 set -euo pipefail
 
+# Include guard — prevent re-definition of readonly arrays on multiple source calls
+[[ -n "${_INSTALL_KIT_SH_LOADED:-}" ]] && return 0
+readonly _INSTALL_KIT_SH_LOADED=1
+
 # ---------------------------------------------------------------------------
 # Protected files that must NEVER be overwritten by a kit install
 # ---------------------------------------------------------------------------
@@ -27,6 +31,82 @@ readonly KIT_COPYABLE_DIRS=(
 readonly KIT_COPYABLE_FILES=(
   "CLAUDE.md"
 )
+
+# ---------------------------------------------------------------------------
+# _find_kit_root — detect where kit items live inside a cloned repo.
+# Some repos place agents/, skills/, etc. in a subdirectory rather than at root.
+# Returns the best candidate path on stdout (falls back to $1 if none found).
+# ---------------------------------------------------------------------------
+_find_kit_root() {
+  local tmp_dir="$1"
+  # Local copy — avoids bash 3.2 scoping issue where readonly globals declared
+  # in a sourced script are invisible outside the calling function's scope.
+  local _dirs=(agents skills hooks rules scripts .kitsync)
+
+  # Fast path: any copyable dir exists at root → standard layout
+  for dir_name in "${_dirs[@]}"; do
+    if [[ -d "$tmp_dir/$dir_name" ]]; then
+      echo "$tmp_dir"
+      return 0
+    fi
+  done
+
+  # Scan up to depth 4 for copyable dir names in subdirectories.
+  # For each candidate parent, count how many copyable dirs it contains.
+  # Pick the parent with the highest count (shallowest wins on tie).
+  local best_parent="" best_count=0 seen_parents=""
+
+  for dir_name in "${_dirs[@]}"; do
+    while IFS= read -r found; do
+      local parent
+      parent="$(dirname "$found")"
+
+      # Skip already-scored parents (we already counted all their copyable dirs)
+      [[ ",$seen_parents," == *",$parent,"* ]] && continue
+      seen_parents="${seen_parents:+$seen_parents,}$parent"
+
+      local count=0
+      for check in "${_dirs[@]}"; do
+        [[ -d "$parent/$check" ]] && count=$(( count + 1 ))
+      done
+
+      if (( count > best_count )) || \
+         { (( count == best_count && count > 0 )) && \
+           (( ${#parent} < ${#best_parent} )); }; then
+        best_count=$count
+        best_parent="$parent"
+      fi
+    done < <(find "$tmp_dir" -mindepth 2 -maxdepth 4 -type d -name "$dir_name" 2>/dev/null)
+  done
+
+  if [[ -n "$best_parent" && $best_count -gt 0 ]]; then
+    log_info "Non-standard layout detected — kit root: ${best_parent#"$tmp_dir/"}"
+    echo "$best_parent"
+  else
+    echo "$tmp_dir"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# _parse_skill_url — parse a URL that may point to a specific item in a repo.
+# Handles GitHub tree URLs: https://github.com/owner/repo/tree/<branch>/<path>
+# Sets globals: _PARSED_REPO_URL, _PARSED_SUBPATH
+# ---------------------------------------------------------------------------
+_PARSED_REPO_URL=""
+_PARSED_SUBPATH=""
+
+_parse_skill_url() {
+  local url="$1"
+  _PARSED_SUBPATH=""
+
+  if [[ "$url" =~ ^(https://github\.com/[^/]+/[^/]+)/tree/[^/]+/(.+)$ ]]; then
+    _PARSED_REPO_URL="${BASH_REMATCH[1]}"
+    _PARSED_SUBPATH="${BASH_REMATCH[2]}"
+  else
+    _PARSED_REPO_URL="$url"
+    _PARSED_SUBPATH=""
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # _is_protected — returns 0 if the given relative path should not be touched
@@ -161,33 +241,66 @@ _copy_kit_dir() {
 }
 
 # ---------------------------------------------------------------------------
-# cmd_install — main entry point for `kitsync install <url>`
+# cmd_install — main entry point for `kitsync install [--skill] <url>`
 # ---------------------------------------------------------------------------
 cmd_install() {
-  local kit_url="${1:-}"
+  local kit_url="" _mode="full"
+
+  # Parse flags (pattern consistent with push/init commands)
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --skill)
+        _mode="skill"
+        shift
+        kit_url="${1:-}"
+        [[ -z "$kit_url" ]] && die "--skill requires a URL argument"
+        shift
+        ;;
+      --skill=*)
+        _mode="skill"
+        kit_url="${1#--skill=}"
+        shift
+        ;;
+      -*)
+        die "Unknown option: $1 (usage: claude-kitsync install [--skill] <url>)"
+        ;;
+      *)
+        kit_url="$1"
+        shift
+        ;;
+    esac
+  done
 
   if [[ -z "$kit_url" ]]; then
-    die "Usage: claude-kitsync install <github-url>"
+    die "Usage: claude-kitsync install [--skill] <github-url>"
   fi
 
   require_command git
 
   # ---------------------------------------------------------------------------
-  # Step 1: Clone into a temp directory
+  # Step 1: Resolve clone URL (handle GitHub tree URLs for --skill)
+  # ---------------------------------------------------------------------------
+  local clone_url="$kit_url"
+  if [[ "$_mode" == "skill" ]]; then
+    _parse_skill_url "$kit_url"
+    clone_url="$_PARSED_REPO_URL"
+  fi
+
+  # Validate URL scheme — only https:// and git@ are accepted
+  if [[ ! "$clone_url" =~ ^(https://|git@) ]]; then
+    die "Only https:// and git@ URLs are accepted (got: $clone_url)"
+  fi
+
+  # ---------------------------------------------------------------------------
+  # Step 2: Clone into a temp directory
   # ---------------------------------------------------------------------------
   local tmp_dir
   tmp_dir="$(mktemp -d)"
-  # Ensure cleanup on exit
   trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
-  # Validate URL scheme — only https:// and git@ are accepted
-  if [[ ! "$kit_url" =~ ^(https://|git@) ]]; then
-    die "Only https:// and git@ URLs are accepted (got: $kit_url)"
-  fi
-
-  log_step "Cloning kit from $kit_url..."
-  if ! git clone --depth 1 "$kit_url" "$tmp_dir" 2>/dev/null; then
-    die "Failed to clone $kit_url — check the URL and your network connection."
+  log_step "Cloning kit from $clone_url..."
+  if ! git clone --depth 1 "$clone_url" "$tmp_dir" 2>/dev/null; then
+    die "Failed to clone $clone_url — check the URL and your network connection."
   fi
   log_success "Kit cloned successfully."
 
@@ -195,32 +308,53 @@ cmd_install() {
   _KIT_CONFLICT_ALL=""
 
   # ---------------------------------------------------------------------------
-  # Step 2: Copy selectable directories
+  # Step 3: Install based on mode
   # ---------------------------------------------------------------------------
-  for dir_name in "${KIT_COPYABLE_DIRS[@]}"; do
-    local kit_dir="$tmp_dir/$dir_name"
-    if [[ -d "$kit_dir" ]]; then
-      _copy_kit_dir "$kit_dir" "$CLAUDE_HOME"
-    fi
-  done
-
-  # ---------------------------------------------------------------------------
-  # Step 3: Copy selectable top-level files
-  # ---------------------------------------------------------------------------
-  for file_name in "${KIT_COPYABLE_FILES[@]}"; do
-    local kit_file="$tmp_dir/$file_name"
-    if [[ -f "$kit_file" ]]; then
-      local dest_file="$CLAUDE_HOME/$file_name"
-
-      # Never overwrite protected files
-      if _is_protected "$file_name"; then
-        log_warn "Protected file skipped: $file_name"
-        continue
+  if [[ "$_mode" == "skill" ]]; then
+    # --skill: install only skills
+    if [[ -n "$_PARSED_SUBPATH" ]]; then
+      # Specific skill path extracted from a GitHub tree URL
+      local specific_dir="$tmp_dir/$_PARSED_SUBPATH"
+      if [[ ! -d "$specific_dir" ]]; then
+        die "Path not found in repository: $_PARSED_SUBPATH"
       fi
-
-      _copy_kit_item "$kit_file" "$dest_file"
+      log_step "Installing skill from $_PARSED_SUBPATH..."
+      _copy_kit_dir "$specific_dir" "$CLAUDE_HOME/skills"
+    else
+      # Plain repo URL with --skill: detect layout then install only skills/
+      local kit_root
+      kit_root="$(_find_kit_root "$tmp_dir")"
+      local skills_src="$kit_root/skills"
+      if [[ ! -d "$skills_src" ]]; then
+        die "No skills/ directory found in repository"
+      fi
+      _copy_kit_dir "$skills_src" "$CLAUDE_HOME"
     fi
-  done
+  else
+    # ---------------------------------------------------------------------------
+    # Full install: detect kit root (flexible layout) then copy all categories
+    # ---------------------------------------------------------------------------
+    local kit_root
+    kit_root="$(_find_kit_root "$tmp_dir")"
+
+    for dir_name in "${KIT_COPYABLE_DIRS[@]}"; do
+      local kit_dir="$kit_root/$dir_name"
+      if [[ -d "$kit_dir" ]]; then
+        _copy_kit_dir "$kit_dir" "$CLAUDE_HOME"
+      fi
+    done
+
+    for file_name in "${KIT_COPYABLE_FILES[@]}"; do
+      local kit_file="$kit_root/$file_name"
+      if [[ -f "$kit_file" ]]; then
+        if _is_protected "$file_name"; then
+          log_warn "Protected file skipped: $file_name"
+          continue
+        fi
+        _copy_kit_item "$kit_file" "$CLAUDE_HOME/$file_name"
+      fi
+    done
+  fi
 
   # ---------------------------------------------------------------------------
   # Step 4: Cleanup (handled by trap)
