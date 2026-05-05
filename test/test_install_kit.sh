@@ -315,6 +315,101 @@ run_test_ac8_via_lib_if_available() {
 }
 
 # ---------------------------------------------------------------------------
+# _create_nonstandard_kit — creates a fake kit with dirs in a subdirectory
+# ---------------------------------------------------------------------------
+_create_nonstandard_kit() {
+  local kit_dir
+  kit_dir="$(mktemp -d)"
+
+  mkdir -p "$kit_dir/mykit/agents" "$kit_dir/mykit/skills"
+  echo "# Kit Agent"  > "$kit_dir/mykit/agents/kit-agent.md"
+  echo "# Kit Skill"  > "$kit_dir/mykit/skills/kit-skill.md"
+  echo "# Readme"     > "$kit_dir/README.md"
+
+  printf "%s" "$kit_dir"
+}
+
+# ---------------------------------------------------------------------------
+# Flexible layout tests
+# ---------------------------------------------------------------------------
+
+run_test_install_nonstandard_layout() {
+  if [[ "$_INSTALL_KIT_LIB_AVAILABLE" != "1" ]] && ! _source_install_kit_lib; then
+    printf "  SKIP  flexible layout: lib/install-kit.sh not available\n"
+    return 0
+  fi
+
+  setup_fake_claude_home
+  trap "teardown_fake_claude_home" RETURN
+
+  local kit_dir
+  kit_dir="$(_create_nonstandard_kit)"
+  trap "rm -rf '$kit_dir'" RETURN
+
+  local result
+  result="$(_find_kit_root "$kit_dir" 2>/dev/null)"
+
+  assert_eq "$result" "$kit_dir/mykit" \
+    "flexible layout: _find_kit_root detects subdirectory as kit root"
+}
+
+run_test_install_nonstandard_layout_standard_wins() {
+  if [[ "$_INSTALL_KIT_LIB_AVAILABLE" != "1" ]] && ! _source_install_kit_lib; then
+    printf "  SKIP  flexible layout fallback: lib/install-kit.sh not available\n"
+    return 0
+  fi
+
+  setup_fake_claude_home
+  trap "teardown_fake_claude_home" RETURN
+
+  local kit_dir
+  kit_dir="$(mktemp -d)"
+  trap "rm -rf '$kit_dir'" RETURN
+
+  # Standard layout at root takes precedence over nested dirs
+  mkdir -p "$kit_dir/agents" "$kit_dir/subdir/agents"
+  echo "# Root Agent" > "$kit_dir/agents/root-agent.md"
+
+  local result
+  result="$(_find_kit_root "$kit_dir" 2>/dev/null)"
+
+  assert_eq "$result" "$kit_dir" \
+    "flexible layout: standard root layout preferred over nested dirs"
+}
+
+# ---------------------------------------------------------------------------
+# --skill flag tests
+# ---------------------------------------------------------------------------
+
+run_test_parse_skill_url_tree_url() {
+  if [[ "$_INSTALL_KIT_LIB_AVAILABLE" != "1" ]] && ! _source_install_kit_lib; then
+    printf "  SKIP  _parse_skill_url: lib/install-kit.sh not available\n"
+    return 0
+  fi
+
+  _parse_skill_url "https://github.com/user/repo/tree/main/skills/my-skill"
+
+  assert_eq "$_PARSED_REPO_URL" "https://github.com/user/repo" \
+    "--skill: _parse_skill_url extracts repo URL from GitHub tree URL"
+  assert_eq "$_PARSED_SUBPATH" "skills/my-skill" \
+    "--skill: _parse_skill_url extracts subpath from GitHub tree URL"
+}
+
+run_test_parse_skill_url_plain_url() {
+  if [[ "$_INSTALL_KIT_LIB_AVAILABLE" != "1" ]] && ! _source_install_kit_lib; then
+    printf "  SKIP  _parse_skill_url plain: lib/install-kit.sh not available\n"
+    return 0
+  fi
+
+  _parse_skill_url "https://github.com/user/repo"
+
+  assert_eq "$_PARSED_REPO_URL" "https://github.com/user/repo" \
+    "--skill: _parse_skill_url leaves plain URL unchanged"
+  assert_eq "$_PARSED_SUBPATH" "" \
+    "--skill: _parse_skill_url sets empty subpath for plain URL"
+}
+
+# ---------------------------------------------------------------------------
 # Run all tests in this module
 # ---------------------------------------------------------------------------
 run_install_kit_tests() {
@@ -331,4 +426,8 @@ run_install_kit_tests() {
   run_test_ac8_claude_md_copied_when_absent
   run_test_ac8_claude_md_not_overwritten_by_skip
   run_test_ac8_via_lib_if_available
+  run_test_install_nonstandard_layout
+  run_test_install_nonstandard_layout_standard_wins
+  run_test_parse_skill_url_tree_url
+  run_test_parse_skill_url_plain_url
 }
