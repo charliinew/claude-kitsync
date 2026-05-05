@@ -115,12 +115,15 @@ _settings_profiles() {
 _settings_sync() {
   local cfg="$CLAUDE_HOME/.kitsync/config"
   if [[ -f "$cfg" ]]; then
-    local pull_mode push_mode push_timer
+    local pull_mode push_mode push_timer push_items pull_items
     pull_mode="$(grep '^KITSYNC_PULL_MODE=' "$cfg" 2>/dev/null | cut -d= -f2- || echo auto)"
     push_mode="$(grep '^KITSYNC_PUSH_MODE=' "$cfg" 2>/dev/null | cut -d= -f2- || echo end_of_session)"
     push_timer="$(grep '^KITSYNC_PUSH_TIMER=' "$cfg" 2>/dev/null | cut -d= -f2- || echo 15)"
+    push_items="$(grep '^KITSYNC_PUSH_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2- || echo 'all')"
+    pull_items="$(grep '^KITSYNC_PULL_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2- || echo 'all')"
     printf "\n" >&2
     log_info "Current: pull=$pull_mode  push=${push_mode}$( [[ "$push_mode" == "timer" ]] && printf " (every %sm)" "$push_timer" || true)"
+    log_info "Push items: ${push_items:-all}  |  Pull items: ${pull_items:-all}"
   fi
 
   _prompt_sync_preferences
@@ -256,6 +259,37 @@ _settings_about() {
 }
 
 # ---------------------------------------------------------------------------
+# _settings_upgrade — toggle upgrade channel between stable and dev
+# ---------------------------------------------------------------------------
+_settings_upgrade() {
+  local cfg="$CLAUDE_HOME/.kitsync/config"
+  local current
+  current="$(grep '^KITSYNC_UPGRADE_CHANNEL=' "$cfg" 2>/dev/null | cut -d= -f2-)"
+  [[ -z "$current" ]] && current="stable"
+
+  local choice
+  choice="$(_select_menu "Upgrade channel  (current: $current)" \
+    "stable  (recommended) — latest GitHub release" \
+    "dev     — latest commit on main branch" \
+    "Back")"
+
+  local new_channel
+  case "$choice" in
+    1) new_channel="stable" ;;
+    2) new_channel="dev" ;;
+    3) return 0 ;;
+  esac
+
+  mkdir -p "$(dirname "$cfg")"
+  if grep -q '^KITSYNC_UPGRADE_CHANNEL=' "$cfg" 2>/dev/null; then
+    _sed_inplace "s|^KITSYNC_UPGRADE_CHANNEL=.*|KITSYNC_UPGRADE_CHANNEL=$new_channel|" "$cfg"
+  else
+    printf 'KITSYNC_UPGRADE_CHANNEL=%s\n' "$new_channel" >> "$cfg"
+  fi
+  log_success "Upgrade channel set to: $new_channel"
+}
+
+# ---------------------------------------------------------------------------
 # cmd_settings — main settings loop with category navigation
 # ---------------------------------------------------------------------------
 cmd_settings() {
@@ -278,6 +312,7 @@ cmd_settings() {
       "Security             — encryption for API keys" \
       "Sync timing          — pull / push modes" \
       "Shell wrapper        — reinstall or remove" \
+      "Upgrade channel      — stable release or dev (latest commit)" \
       "Status & info        — config, version, doctor" \
       "Exit")"
 
@@ -287,8 +322,9 @@ cmd_settings() {
       3) _settings_security ;;
       4) _settings_sync ;;
       5) _settings_wrapper ;;
-      6) _settings_about ;;
-      7) break ;;
+      6) _settings_upgrade ;;
+      7) _settings_about ;;
+      8) break ;;
     esac
   done
 }
