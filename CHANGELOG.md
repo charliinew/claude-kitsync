@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.2] — 2026-05-05
+
+### Fixed
+- **`init` — per-file conflict resolution on initial commit**: when connecting to an existing remote, files that differ between local and remote now trigger a `[R]emote / [L]ocal / [P]ass` prompt instead of being silently overwritten. Remote-only files are pulled automatically; local-only files are staged as new additions.
+
 ## [1.0.0] — 2026-05-03
 
 First stable release. All core sync features are production-ready.
