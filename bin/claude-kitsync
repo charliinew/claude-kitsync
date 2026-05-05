@@ -67,7 +67,7 @@ _usage() {
     ${_CLR_CYAN}profile${_CLR_RESET} [list|add|switch|remove]  Manage sync profiles (work, perso...)
     ${_CLR_CYAN}encrypt${_CLR_RESET} [enable|disable|rotate|status]  Encrypt settings.json before push
     ${_CLR_CYAN}settings${_CLR_RESET}                Change sync preferences (pull/push mode)
-    ${_CLR_CYAN}upgrade${_CLR_RESET}                 Update claude-kitsync to the latest version
+    ${_CLR_CYAN}upgrade${_CLR_RESET} [--dev]            Update to the latest stable release (--dev: latest commit)
     ${_CLR_CYAN}doctor${_CLR_RESET}                  Run health checks on your setup
     ${_CLR_CYAN}restore${_CLR_RESET}                 Restore a rc file from a kitsync backup
     ${_CLR_CYAN}uninstall${_CLR_RESET}               Remove claude-kitsync completely
@@ -242,32 +242,109 @@ cmd_uninstall() {
 }
 
 # ---------------------------------------------------------------------------
-# cmd_upgrade — pull latest version of claude-kitsync from GitHub
+# cmd_upgrade — update claude-kitsync to the latest stable release, or latest commit (dev mode)
+# Usage: claude-kitsync upgrade [--dev]
 # ---------------------------------------------------------------------------
 cmd_upgrade() {
-  log_step "Checking for updates..."
+  local _dev_mode=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dev) _dev_mode=true; shift ;;
+      *) die "Unknown option: $1 (usage: claude-kitsync upgrade [--dev])" ;;
+    esac
+  done
 
   if [[ ! -d "$KITSYNC_ROOT/.git" ]]; then
     log_warn "KITSYNC_ROOT is not a git repo — can't auto-upgrade."
-    log_warn "Re-run the installer to upgrade:"
-    log_warn "  curl -fsSL https://raw.githubusercontent.com/charliinew/claude-kitsync/main/install.sh | bash"
+    log_warn "Re-run the installer: curl -fsSL https://raw.githubusercontent.com/charliinew/claude-kitsync/main/install.sh | bash"
     return 1
   fi
 
-  local before_sha after_sha
-  before_sha="$(git -C "$KITSYNC_ROOT" rev-parse --short HEAD 2>/dev/null || echo '?')"
+  # Check config for dev channel if flag not set
+  if [[ "$_dev_mode" != true ]]; then
+    local _channel
+    _channel="$(grep '^KITSYNC_UPGRADE_CHANNEL=' "$CLAUDE_HOME/.kitsync/config" 2>/dev/null | cut -d= -f2-)"
+    [[ "$_channel" == "dev" ]] && _dev_mode=true
+  fi
 
-  if git -C "$KITSYNC_ROOT" pull --rebase -q 2>&1; then
-    after_sha="$(git -C "$KITSYNC_ROOT" rev-parse --short HEAD 2>/dev/null || echo '?')"
-    if [[ "$before_sha" == "$after_sha" ]]; then
-      log_success "Already up to date  ($after_sha)"
+  # ---------------------------------------------------------------------------
+  # Dev mode — latest commit on main
+  # ---------------------------------------------------------------------------
+  if [[ "$_dev_mode" == true ]]; then
+    log_step "Upgrading to latest commit (dev channel)..."
+    local before_sha after_sha
+    before_sha="$(git -C "$KITSYNC_ROOT" rev-parse --short HEAD 2>/dev/null || echo '?')"
+    if git -C "$KITSYNC_ROOT" pull --rebase -q 2>/dev/null; then
+      after_sha="$(git -C "$KITSYNC_ROOT" rev-parse --short HEAD 2>/dev/null || echo '?')"
+      if [[ "$before_sha" == "$after_sha" ]]; then
+        log_success "Already up to date  ($after_sha)"
+      else
+        log_success "Upgraded: $before_sha → $after_sha"
+      fi
     else
-      log_success "Upgraded: $before_sha → $after_sha"
+      log_warn "Upgrade failed — check your network and try again."
+      return 1
     fi
-  else
-    log_warn "Upgrade failed — check your network and try again."
+    return 0
+  fi
+
+  # ---------------------------------------------------------------------------
+  # Stable mode — latest GitHub release
+  # ---------------------------------------------------------------------------
+  log_step "Checking latest release..."
+
+  local latest_tag=""
+
+  # Try GitHub API (returns latest non-pre-release)
+  if command -v curl &>/dev/null; then
+    latest_tag="$(curl -fsSL \
+      "https://api.github.com/repos/charliinew/claude-kitsync/releases/latest" \
+      2>/dev/null | grep '"tag_name"' | head -1 | \
+      sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')"
+  fi
+
+  # Fallback: git ls-remote (picks highest semver tag)
+  if [[ -z "$latest_tag" ]]; then
+    latest_tag="$(git ls-remote --tags --sort=-v:refname \
+      "https://github.com/charliinew/claude-kitsync" 'refs/tags/v*' 2>/dev/null \
+      | grep -v '\^{}' | head -1 | sed 's|.*refs/tags/||')"
+  fi
+
+  if [[ -z "$latest_tag" ]]; then
+    log_warn "Could not determine latest release — check your network."
+    log_info "Tip: use --dev to upgrade to the latest commit instead."
     return 1
   fi
+
+  local current_version
+  current_version="$(<"$KITSYNC_ROOT/VERSION" 2>/dev/null || echo "0.0.0")"
+  local latest_version="${latest_tag#v}"
+
+  if [[ "$current_version" == "$latest_version" ]]; then
+    log_success "Already up to date  (v$current_version)"
+    return 0
+  fi
+
+  log_info "Current: v$current_version  →  Latest: $latest_tag"
+  log_step "Downloading release $latest_tag..."
+
+  # Fetch the specific tag commit (shallow, only what we need)
+  if ! git -C "$KITSYNC_ROOT" fetch -q --depth 1 origin \
+       "refs/tags/$latest_tag" 2>/dev/null; then
+    log_warn "Fetch failed — check your network and try again."
+    return 1
+  fi
+
+  # Reset working tree to the fetched commit
+  if ! git -C "$KITSYNC_ROOT" reset --hard FETCH_HEAD 2>/dev/null; then
+    log_warn "Could not apply release $latest_tag."
+    return 1
+  fi
+
+  local new_version
+  new_version="$(<"$KITSYNC_ROOT/VERSION" 2>/dev/null || echo "$latest_tag")"
+  log_success "Upgraded: v$current_version → v$new_version"
 }
 
 # ---------------------------------------------------------------------------
@@ -343,7 +420,8 @@ main() {
       cmd_restore
       ;;
     upgrade)
-      cmd_upgrade
+      shift
+      cmd_upgrade "$@"
       ;;
     uninstall)
       cmd_uninstall
