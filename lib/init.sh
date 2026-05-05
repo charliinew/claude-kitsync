@@ -61,6 +61,117 @@ _generate_settings_template() {
 #   "none"    = no remote configured
 # ---------------------------------------------------------------------------
 _INIT_REMOTE_MODE=""
+_INIT_SKIPPED_FILES=()
+
+# ---------------------------------------------------------------------------
+# _init_prompt_file_conflict — show REMOTE/LOCAL/PASS prompt for one file.
+# Choices:
+#   R — checkout FETCH_HEAD version onto disk (remote wins)
+#   L — keep the local file as-is
+#   P — skip this file entirely (won't be committed)
+# ---------------------------------------------------------------------------
+_init_prompt_file_conflict() {
+  local _rel="$1"
+  local _full="$CLAUDE_HOME/$_rel"
+
+  local _remote_lines _local_lines
+  _remote_lines=$(git -C "$CLAUDE_HOME" show "FETCH_HEAD:$_rel" 2>/dev/null | wc -l | tr -d ' ')
+  _local_lines=$(wc -l < "$_full" 2>/dev/null | tr -d ' ' || echo "0")
+
+  printf "\n"
+  log_warn "Conflict: $_rel  (remote: ${_remote_lines}L | local: ${_local_lines}L)"
+  diff \
+    <(git -C "$CLAUDE_HOME" show "FETCH_HEAD:$_rel" 2>/dev/null) \
+    "$_full" 2>/dev/null | head -30 || true
+
+  local _choice=""
+  if [[ -t 0 ]]; then
+    while true; do
+      printf "  [R]emote  [L]ocal  [P]ass > "
+      read -r _choice < /dev/tty 2>/dev/null || _choice="R"
+      case "${_choice^^}" in R|L|P) break ;; *) printf "  Please enter R, L, or P\n" ;; esac
+    done
+  else
+    _choice="R"
+    log_info "  Non-interactive: using remote for $_rel"
+  fi
+
+  case "${_choice^^}" in
+    R)
+      git -C "$CLAUDE_HOME" checkout FETCH_HEAD -- "$_rel" 2>/dev/null
+      log_success "  → Remote: $_rel"
+      ;;
+    L)
+      log_info "  → Local:  $_rel"
+      ;;
+    P)
+      log_info "  → Skipped: $_rel (will not be committed)"
+      _INIT_SKIPPED_FILES+=("$_rel")
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# _init_resolve_conflicts — compare local files with FETCH_HEAD:
+#   - remote-only files  → pulled automatically (no prompt)
+#   - both with diff     → REMOTE / LOCAL / PASS prompt per file
+#   - local-only files   → left as-is (staged later in Step 5)
+# ---------------------------------------------------------------------------
+_init_resolve_conflicts() {
+  local _whitelist=("settings.json" "CLAUDE.md" "agents" "skills" "hooks" "scripts" "rules")
+
+  local _conflict_count=0
+  local _pulled_count=0
+
+  for _item in "${_whitelist[@]}"; do
+    local _local_path="$CLAUDE_HOME/$_item"
+
+    if [[ -d "$_local_path" ]]; then
+      # Directory: walk every file present in FETCH_HEAD under this path
+      while IFS= read -r _rel_file; do
+        [[ -z "$_rel_file" ]] && continue
+        local _local_file="$CLAUDE_HOME/$_rel_file"
+
+        if [[ -f "$_local_file" ]]; then
+          if ! diff -q "$_local_file" \
+               <(git -C "$CLAUDE_HOME" show "FETCH_HEAD:$_rel_file" 2>/dev/null) \
+               &>/dev/null 2>&1; then
+            _init_prompt_file_conflict "$_rel_file"
+            (( _conflict_count++ )) || true
+          fi
+        else
+          mkdir -p "$(dirname "$_local_file")"
+          git -C "$CLAUDE_HOME" checkout FETCH_HEAD -- "$_rel_file" 2>/dev/null && {
+            log_success "Pulled from remote: $_rel_file"
+            (( _pulled_count++ )) || true
+          } || true
+        fi
+      done < <(git -C "$CLAUDE_HOME" ls-tree -r --name-only FETCH_HEAD -- "${_item}/" 2>/dev/null)
+
+    elif [[ -f "$_local_path" ]]; then
+      if git -C "$CLAUDE_HOME" show "FETCH_HEAD:$_item" &>/dev/null 2>&1; then
+        if ! diff -q "$_local_path" \
+             <(git -C "$CLAUDE_HOME" show "FETCH_HEAD:$_item" 2>/dev/null) \
+             &>/dev/null 2>&1; then
+          _init_prompt_file_conflict "$_item"
+          (( _conflict_count++ )) || true
+        fi
+      fi
+    else
+      # Local item absent — pull from remote if available
+      if git -C "$CLAUDE_HOME" checkout FETCH_HEAD -- "$_item" 2>/dev/null; then
+        log_success "Pulled from remote: $_item"
+        (( _pulled_count++ )) || true
+      fi
+    fi
+  done
+
+  if [[ $_conflict_count -eq 0 ]] && [[ $_pulled_count -eq 0 ]]; then
+    log_info "Remote config synced — no conflicts found."
+  elif [[ $_conflict_count -gt 0 ]]; then
+    log_info "Resolved $_conflict_count conflict(s), pulled $_pulled_count remote-only file(s)."
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # _create_repo_via_gh — create a new GitHub repo, return its SSH URL
@@ -398,55 +509,18 @@ GITIGNORE
   fi
 
   # ---------------------------------------------------------------------------
-  # Step 3.5: Merge remote config (automatic)
-  # Only on fresh init — if already_git, user should run 'claude-kitsync pull'.
-  # Stages local files, creates an initial commit, then merges FETCH_HEAD so
-  # that remote-only files are pulled in and conflicts resolve toward the repo
-  # (remote wins — repo is considered the source of truth).
-  # Skipped for new repos (remote is empty) and when no remote is configured.
+  # Step 3.5: Resolve conflicts with remote config
+  # Files only in remote are pulled automatically.
+  # Files present in both local and remote with different content trigger a
+  # per-file REMOTE / LOCAL / PASS prompt.
+  # Files only in local are left as-is and staged in Step 5.
   # ---------------------------------------------------------------------------
   if [[ "$already_git" == "false" ]] && [[ "$_INIT_REMOTE_MODE" != "new" ]]; then
     if git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null 2>&1; then
-      log_step "Merging remote config..."
+      log_step "Comparing local and remote configs..."
       if git -C "$CLAUDE_HOME" fetch origin -q 2>/dev/null && \
          git -C "$CLAUDE_HOME" rev-parse FETCH_HEAD &>/dev/null 2>&1; then
-
-        local _merge_whitelist=("settings.json" "CLAUDE.md" "agents" "skills" "hooks" "scripts" "rules" ".gitignore")
-        for _mi in "${_merge_whitelist[@]}"; do
-          [[ -e "$CLAUDE_HOME/$_mi" ]] && git -C "$CLAUDE_HOME" add "$CLAUDE_HOME/$_mi" 2>/dev/null || true
-        done
-
-        if ! git -C "$CLAUDE_HOME" diff --cached --quiet 2>/dev/null; then
-          # Commit local state so git has a reference point for the merge
-          git -C "$CLAUDE_HOME" commit -q -m "kitsync: local state before remote merge" 2>/dev/null
-
-          # Merge remote — -X theirs means repo wins on conflict
-          if git -C "$CLAUDE_HOME" merge FETCH_HEAD --allow-unrelated-histories -X theirs --no-edit -q 2>/dev/null; then
-            log_success "Remote config merged — repo files applied, local-only files preserved."
-          else
-            git -C "$CLAUDE_HOME" merge --abort 2>/dev/null || true
-            git -C "$CLAUDE_HOME" reset -q 2>/dev/null || true
-            log_warn "Merge failed — falling back to pull of missing files only."
-            local _pull_paths=("settings.json" "CLAUDE.md" "agents" "skills" "hooks" "scripts" "rules")
-            for _p in "${_pull_paths[@]}"; do
-              if [[ ! -e "$CLAUDE_HOME/$_p" ]]; then
-                git -C "$CLAUDE_HOME" checkout FETCH_HEAD -- "$_p" 2>/dev/null && \
-                  log_success "Pulled from remote: $_p" || true
-              fi
-            done
-          fi
-        else
-          # No local files — checkout whitelisted paths directly from remote
-          local _pull_paths=("settings.json" "CLAUDE.md" "agents" "skills" "hooks" "scripts" "rules")
-          local _pulled=0
-          for _p in "${_pull_paths[@]}"; do
-            if git -C "$CLAUDE_HOME" checkout FETCH_HEAD -- "$_p" 2>/dev/null; then
-              log_success "Pulled from remote: $_p"
-              (( _pulled++ )) || true
-            fi
-          done
-          [[ $_pulled -eq 0 ]] && log_info "Remote config pulled — nothing found on remote."
-        fi
+        _init_resolve_conflicts
       else
         log_info "Remote is empty — nothing to pull."
       fi
@@ -534,6 +608,12 @@ GITIGNORE
     if [[ -e "$full_path" ]]; then
       git -C "$CLAUDE_HOME" add "$full_path" 2>/dev/null || true
     fi
+  done
+
+  # Unstage any files the user chose to PASS during conflict resolution
+  for _skipped in "${_INIT_SKIPPED_FILES[@]+"${_INIT_SKIPPED_FILES[@]}"}"; do
+    git -C "$CLAUDE_HOME" restore --staged "$CLAUDE_HOME/$_skipped" 2>/dev/null || \
+      git -C "$CLAUDE_HOME" reset HEAD -- "$CLAUDE_HOME/$_skipped" 2>/dev/null || true
   done
 
   # Safety check before committing (--name-only = one filename per line, match exactly)
