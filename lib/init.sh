@@ -169,6 +169,43 @@ _prompt_remote_url() {
 }
 
 # ---------------------------------------------------------------------------
+# _prompt_sync_items — multi-select which categories to push or pull
+# Arg $1: "push" or "pull"
+# Arg $2: current comma-separated selection (displayed as hint, optional)
+# Returns comma-separated list of selected category names on stdout
+# ---------------------------------------------------------------------------
+_prompt_sync_items() {
+  local direction="$1"
+  local current="${2:-}"
+  local prompt
+  case "$direction" in
+    push) prompt="Which categories to push to remote?" ;;
+    pull) prompt="Which categories to pull from remote?" ;;
+    *)    prompt="Select categories:" ;;
+  esac
+
+  if [[ -n "$current" ]]; then
+    log_info "Current ${direction} selection: ${current}" >&2
+  fi
+
+  local labels=("Agents  (agents/)" "Skills  (skills/)" "Hooks  (hooks/)" \
+    "Scripts  (scripts/)" "Rules  (rules/)" \
+    "Settings  (settings.json)" "Instructions  (CLAUDE.md)")
+  local keys=("agents" "skills" "hooks" "scripts" "rules" "settings.json" "CLAUDE.md")
+
+  local selected_indices
+  selected_indices="$(_select_multi "$prompt" "${labels[@]}")"
+
+  local result=()
+  for idx in $selected_indices; do
+    result+=("${keys[$((idx - 1))]}")
+  done
+
+  local IFS=","
+  echo "${result[*]}"
+}
+
+# ---------------------------------------------------------------------------
 # _prompt_sync_preferences — interactive selection of pull/push modes
 # Writes preferences to $CLAUDE_HOME/.kitsync/config
 # ---------------------------------------------------------------------------
@@ -206,6 +243,18 @@ _prompt_sync_preferences() {
     4) push_mode="never" ;;
   esac
 
+  # --- Sync items (which categories to push / pull) ---
+  local cfg="$CLAUDE_HOME/.kitsync/config"
+  local _cur_push _cur_pull
+  _cur_push="$(grep '^KITSYNC_PUSH_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2- || true)"
+  _cur_pull="$(grep '^KITSYNC_PULL_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2- || true)"
+
+  printf "\n"
+  local push_items
+  push_items="$(_prompt_sync_items "push" "$_cur_push")"
+  local pull_items
+  pull_items="$(_prompt_sync_items "pull" "$_cur_pull")"
+
   # Write config
   mkdir -p "$CLAUDE_HOME/.kitsync"
   cat > "$CLAUDE_HOME/.kitsync/config" <<CONFIG
@@ -214,6 +263,8 @@ _prompt_sync_preferences() {
 KITSYNC_PULL_MODE=${pull_mode}
 KITSYNC_PUSH_MODE=${push_mode}
 KITSYNC_PUSH_TIMER=${push_timer}
+KITSYNC_PUSH_ITEMS=${push_items}
+KITSYNC_PULL_ITEMS=${pull_items}
 CONFIG
 
   log_success "Sync preferences saved."

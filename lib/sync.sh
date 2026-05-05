@@ -18,6 +18,54 @@ readonly SYNC_WHITELIST=(
   "settings.template.json"
 )
 
+# User-configurable categories (infra items are always synced regardless of selection)
+readonly SYNC_USER_CATEGORIES=("agents" "skills" "hooks" "scripts" "rules" "settings.json" "CLAUDE.md")
+
+# Map a user category name to its whitelist path
+_sync_category_to_path() {
+  case "$1" in
+    agents|skills|hooks|scripts|rules) printf '%s/' "$1" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# Returns 0 if the given whitelist item is an infrastructure item (never filtered)
+_sync_is_infra() {
+  case "$1" in
+    ".gitignore"|".kitsync/"|"settings.template.json") return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Returns comma-separated push categories from config, or all if unset
+_sync_get_push_items() {
+  local cfg="$CLAUDE_HOME/.kitsync/config"
+  local raw
+  raw="$(grep '^KITSYNC_PUSH_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2-)"
+  if [[ -z "$raw" ]]; then
+    local IFS=","; echo "${SYNC_USER_CATEGORIES[*]}"
+  else
+    echo "$raw"
+  fi
+}
+
+# Returns comma-separated pull categories from config, or all if unset
+_sync_get_pull_items() {
+  local cfg="$CLAUDE_HOME/.kitsync/config"
+  local raw
+  raw="$(grep '^KITSYNC_PULL_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2-)"
+  if [[ -z "$raw" ]]; then
+    local IFS=","; echo "${SYNC_USER_CATEGORIES[*]}"
+  else
+    echo "$raw"
+  fi
+}
+
+# Returns 0 if $1 is present in the comma-separated list $2
+_sync_item_in_list() {
+  [[ ",$2," == *",$1,"* ]]
+}
+
 # ---------------------------------------------------------------------------
 # _is_dirty — returns 0 if working tree has uncommitted changes, 1 if clean
 # ---------------------------------------------------------------------------
@@ -135,10 +183,34 @@ sync_pull() {
     fi
   fi
 
+  # Save SHA before pull for selective pull restore
+  local _pre_pull_sha
+  _pre_pull_sha="$(git -C "$CLAUDE_HOME" rev-parse HEAD 2>/dev/null || true)"
+
   # Step 2: rebase pull with autostash and theirs strategy (repo wins on conflict)
   local _pull_out
   if _pull_out="$(git -C "$CLAUDE_HOME" pull --rebase --autostash --allow-unrelated-histories -X theirs 2>&1)"; then
     log_success "Pull complete."
+
+    # Selective pull: restore categories not in user's pull selection
+    local _pull_items
+    _pull_items="$(_sync_get_pull_items)"
+    if [[ -n "$_pre_pull_sha" ]]; then
+      for _pull_cat in "${SYNC_USER_CATEGORIES[@]}"; do
+        if ! _sync_item_in_list "$_pull_cat" "$_pull_items"; then
+          local _pull_path
+          _pull_path="$(_sync_category_to_path "$_pull_cat")"
+          if [[ -e "$CLAUDE_HOME/$_pull_path" ]] && \
+             ! git -C "$CLAUDE_HOME" diff --quiet "$_pre_pull_sha" HEAD -- "$_pull_path" 2>/dev/null; then
+            # Restore working tree + index to pre-pull version, then unstage
+            git -C "$CLAUDE_HOME" checkout "$_pre_pull_sha" -- "$_pull_path" 2>/dev/null || true
+            git -C "$CLAUDE_HOME" reset HEAD -- "$_pull_path" 2>/dev/null || true
+            log_info "Selective pull: kept local ${_pull_cat} (not in pull selection)"
+          fi
+        fi
+      done
+    fi
+
     # Step 4: normalise absolute paths after pull
     normalize_paths
     paths_detokenize
@@ -220,7 +292,13 @@ sync_push() {
   # Dry-run: stage → preview → reset → exit
   if [[ "$_dry_run" == true ]]; then
     log_step "Dry run — showing what would be committed\n"
+    local _dry_push_items
+    _dry_push_items="$(_sync_get_push_items)"
     for item in "${SYNC_WHITELIST[@]}"; do
+      if ! _sync_is_infra "$item"; then
+        local _dry_cat="${item%/}"
+        _sync_item_in_list "$_dry_cat" "$_dry_push_items" || continue
+      fi
       local _fp="$CLAUDE_HOME/$item"
       [[ -e "$_fp" ]] && git -C "$CLAUDE_HOME" add "$_fp" 2>/dev/null || true
     done
@@ -270,8 +348,15 @@ sync_push() {
 
   # Stage only whitelisted paths (paths that exist)
   # When encryption is enabled, skip plaintext settings.json — stage .enc instead
+  local _push_items
+  _push_items="$(_sync_get_push_items)"
   local staged_count=0
   for item in "${SYNC_WHITELIST[@]}"; do
+    # Infrastructure items always staged; user categories filtered by config
+    if ! _sync_is_infra "$item"; then
+      local _push_cat="${item%/}"
+      _sync_item_in_list "$_push_cat" "$_push_items" || continue
+    fi
     local full_path="$CLAUDE_HOME/$item"
     # Skip plaintext file if its encrypted version was produced
     if _crypto_is_enabled 2>/dev/null; then
