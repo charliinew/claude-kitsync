@@ -74,7 +74,9 @@ claude() {
       local _h="$1" _cf="$1/.kitsync/conflict_pending"
       local _sha_b
       _sha_b="$(git -C "$_h" rev-parse HEAD 2>/dev/null || true)"
-      if timeout "${KITSYNC_TIMEOUT:-2}" git -C "$_h" pull --rebase --autostash -q 2>/dev/null; then
+      local _pull_exit=0
+      timeout "${KITSYNC_TIMEOUT:-2}" git -C "$_h" pull --rebase --autostash -q 2>/dev/null || _pull_exit=$?
+      if [[ $_pull_exit -eq 0 ]]; then
         rm -f "$_cf" 2>/dev/null || true
         local _sha_a
         _sha_a="$(git -C "$_h" rev-parse HEAD 2>/dev/null || true)"
@@ -83,12 +85,16 @@ claude() {
           printf 'updated\n' > "$_h/.kitsync/pending-notice" 2>/dev/null || true
         fi
         command -v claude-kitsync &>/dev/null && claude-kitsync _post-pull-hook 2>/dev/null || true
-      else
+      elif [[ $_pull_exit -ne 124 ]]; then
+        # Real merge conflict (not a timeout) — abort rebase and notify
         git -C "$_h" rebase --abort 2>/dev/null || true
         local _files
         _files="$(git -C "$_h" diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ',' | sed 's/,$//')"
         mkdir -p "$_h/.kitsync" 2>/dev/null || true
         printf 'files:%s\n' "$_files" > "$_cf"
+      else
+        # Timeout — abort any partial rebase silently, do not flag as conflict
+        git -C "$_h" rebase --abort 2>/dev/null || true
       fi
     }
     if [[ -n "${ZSH_VERSION:-}" ]]; then
