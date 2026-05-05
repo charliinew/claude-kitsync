@@ -75,7 +75,16 @@ claude() {
       local _sha_b
       _sha_b="$(git -C "$_h" rev-parse HEAD 2>/dev/null || true)"
       local _pull_exit=0
-      timeout "${KITSYNC_TIMEOUT:-2}" git -C "$_h" pull --rebase --autostash -q 2>/dev/null || _pull_exit=$?
+      # timeout is not built into macOS zsh; fall back to gtimeout (brew coreutils)
+      # or run without timeout (already in a background subshell, blocking is harmless).
+      local _ks_to="${KITSYNC_TIMEOUT:-2}"
+      if command -v timeout &>/dev/null; then
+        timeout "$_ks_to" git -C "$_h" pull --rebase --autostash -q 2>/dev/null || _pull_exit=$?
+      elif command -v gtimeout &>/dev/null; then
+        gtimeout "$_ks_to" git -C "$_h" pull --rebase --autostash -q 2>/dev/null || _pull_exit=$?
+      else
+        git -C "$_h" pull --rebase --autostash -q 2>/dev/null || _pull_exit=$?
+      fi
       if [[ $_pull_exit -eq 0 ]]; then
         rm -f "$_cf" 2>/dev/null || true
         local _sha_a
@@ -86,12 +95,17 @@ claude() {
         fi
         command -v claude-kitsync &>/dev/null && claude-kitsync _post-pull-hook 2>/dev/null || true
       elif [[ $_pull_exit -ne 124 ]]; then
-        # Real merge conflict (not a timeout) — abort rebase and notify
+        # git pull failed with a non-timeout exit. Abort any in-progress rebase,
+        # then check whether there are real merge conflicts before flagging.
         git -C "$_h" rebase --abort 2>/dev/null || true
         local _files
         _files="$(git -C "$_h" diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ',' | sed 's/,$//')"
-        mkdir -p "$_h/.kitsync" 2>/dev/null || true
-        printf 'files:%s\n' "$_files" > "$_cf"
+        # Only write the sentinel when there are actual conflicting files —
+        # transient git errors (network, lock) must not produce a stale warning.
+        if [[ -n "$_files" ]]; then
+          mkdir -p "$_h/.kitsync" 2>/dev/null || true
+          printf 'files:%s\n' "$_files" > "$_cf"
+        fi
       else
         # Timeout — abort any partial rebase silently, do not flag as conflict
         git -C "$_h" rebase --abort 2>/dev/null || true
@@ -125,6 +139,29 @@ claude() {
            claude-kitsync push --auto "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" >/dev/null || true
        done) &
       disown
+    fi
+  fi
+
+  # Safety net: if settings.json still contains __CLAUDE_HOME__ tokens (e.g. after
+  # a push that was interrupted between paths_tokenize and paths_detokenize), fix
+  # them before launching Claude so hooks receive real paths.
+  local _ks_settings="$_ks_home/settings.json"
+  if [[ -f "$_ks_settings" ]] && grep -qF "__CLAUDE_HOME__" "$_ks_settings" 2>/dev/null; then
+    local _ks_repl
+    _ks_repl="$(printf '%s' "$_ks_home" | sed 's|[&\\|]|\\&|g')"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      sed -i '' "s|__CLAUDE_HOME__|${_ks_repl}|g" "$_ks_settings" 2>/dev/null || true
+    else
+      sed -i "s|__CLAUDE_HOME__|${_ks_repl}|g" "$_ks_settings" 2>/dev/null || true
+    fi
+  fi
+  if [[ -f "$_ks_settings" ]] && grep -qF "__HOME__" "$_ks_settings" 2>/dev/null; then
+    local _ks_repl_home
+    _ks_repl_home="$(printf '%s' "$HOME" | sed 's|[&\\|]|\\&|g')"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      sed -i '' "s|__HOME__|${_ks_repl_home}|g" "$_ks_settings" 2>/dev/null || true
+    else
+      sed -i "s|__HOME__|${_ks_repl_home}|g" "$_ks_settings" 2>/dev/null || true
     fi
   fi
 
