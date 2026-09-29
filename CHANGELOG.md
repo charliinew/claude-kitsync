@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.1.3] — 2026-09-29
 
 ### Fixed
 - **Working tree always dirty after push** — path tokens (`__CLAUDE_HOME__`, `__HOME__`) are now applied by a git clean/smudge filter (per-machine, in `.git/config` + `.git/info/attributes`) instead of rewriting `settings.json` in place. `pull` is no longer skipped after every push, and `settings.json` is never rewritten while Claude Code is running. Existing repos get a one-time `kitsync: portable path tokens` commit.
