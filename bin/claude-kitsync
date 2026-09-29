@@ -264,7 +264,7 @@ cmd_upgrade() {
   # Check config for dev channel if flag not set
   if [[ "$_dev_mode" != true ]]; then
     local _channel
-    _channel="$(grep '^KITSYNC_UPGRADE_CHANNEL=' "$CLAUDE_HOME/.kitsync/config" 2>/dev/null | cut -d= -f2-)"
+    _channel="$(grep '^KITSYNC_UPGRADE_CHANNEL=' "$CLAUDE_HOME/.kitsync/config" 2>/dev/null | cut -d= -f2- || true)"
     [[ "$_channel" == "dev" ]] && _dev_mode=true
   fi
 
@@ -337,7 +337,7 @@ cmd_upgrade() {
   fi
 
   # Reset working tree to the fetched commit
-  if ! git -C "$KITSYNC_ROOT" reset --hard FETCH_HEAD 2>/dev/null; then
+  if ! git -C "$KITSYNC_ROOT" reset -q --hard FETCH_HEAD 2>/dev/null; then
     log_warn "Could not apply release $latest_tag."
     return 1
   fi

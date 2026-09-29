@@ -264,7 +264,7 @@ _settings_about() {
 _settings_upgrade() {
   local cfg="$CLAUDE_HOME/.kitsync/config"
   local current
-  current="$(grep '^KITSYNC_UPGRADE_CHANNEL=' "$cfg" 2>/dev/null | cut -d= -f2-)"
+  current="$(grep '^KITSYNC_UPGRADE_CHANNEL=' "$cfg" 2>/dev/null | cut -d= -f2- || true)"
   [[ -z "$current" ]] && current="stable"
 
   local choice

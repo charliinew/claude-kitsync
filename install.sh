@@ -280,8 +280,14 @@ if [[ -n "${KITSYNC_INSTALL_DIR:-}" ]]; then
   _log "Using local install dir: $install_dir"
 elif [[ -d "$install_dir/.git" ]]; then
   _step "Updating kitsync..."
-  git -C "$install_dir" pull --rebase -q 2>/dev/null || _warn "Update failed, keeping current version."
-  _ok "kitsync up to date"
+  # The install dir is a managed clone: align it on origin/main (a pull --rebase
+  # fails if upstream history was ever rewritten)
+  if git -C "$install_dir" fetch -q origin main 2>/dev/null && \
+     git -C "$install_dir" reset -q --hard origin/main 2>/dev/null; then
+    _ok "kitsync up to date"
+  else
+    _warn "Update failed, keeping current version."
+  fi
 else
   _step "Installing kitsync..."
   [[ -d "$install_dir" ]] && rm -rf "$install_dir"

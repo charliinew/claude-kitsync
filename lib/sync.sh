@@ -102,7 +102,7 @@ _sync_prepare_repo() {
 _sync_get_push_items() {
   local cfg="$CLAUDE_HOME/.kitsync/config"
   local raw
-  raw="$(grep '^KITSYNC_PUSH_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2-)"
+  raw="$(grep '^KITSYNC_PUSH_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2- || true)"
   if [[ -z "$raw" ]]; then
     local IFS=","; echo "${SYNC_USER_CATEGORIES[*]}"
   else
@@ -114,7 +114,7 @@ _sync_get_push_items() {
 _sync_get_pull_items() {
   local cfg="$CLAUDE_HOME/.kitsync/config"
   local raw
-  raw="$(grep '^KITSYNC_PULL_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2-)"
+  raw="$(grep '^KITSYNC_PULL_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2- || true)"
   if [[ -z "$raw" ]]; then
     local IFS=","; echo "${SYNC_USER_CATEGORIES[*]}"
   else
