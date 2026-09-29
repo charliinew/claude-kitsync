@@ -32,8 +32,11 @@ No prompts — fully automated setup.
 
 ```bash
 brew tap charliinew/claude-kitsync https://github.com/charliinew/claude-kitsync
+brew trust --formula charliinew/claude-kitsync/claude-kitsync   # Homebrew 6+ requires trusting third-party taps
 brew install claude-kitsync
 ```
+
+Use one install method only: Homebrew (`brew upgrade claude-kitsync`) or the script (`claude-kitsync upgrade`).
 
 ---
 
