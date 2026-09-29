@@ -65,7 +65,7 @@ run_test_ac7_sync_pull_skips_dirty_tree() {
   if ! _source_sync_lib; then
     printf "  SKIP  AC7: lib/sync.sh not yet implemented — testing skip logic inline\n"
 
-    # Inline spec test: the logic from PLAN.md
+    # Inline spec test: the dirty-tree guard from the original design
     setup_git_claude_home
     trap "teardown_fake_claude_home" RETURN
 
@@ -73,7 +73,7 @@ run_test_ac7_sync_pull_skips_dirty_tree() {
 
     local skipped=0
     local warn_output=""
-    # Replicate the intended guard from lib/sync.sh as described in PLAN.md:
+    # Replicate the intended guard from lib/sync.sh per the original design:
     # "Check dirty → warn and return"
     if _is_dirty "$CLAUDE_HOME"; then
       skipped=1
@@ -149,7 +149,7 @@ run_test_ac7_clean_tree_rebase_succeeds_locally() {
 }
 
 run_test_ac7_warning_message_format() {
-  # The warning from PLAN.md must contain "Uncommitted changes" or "skipping"
+  # The warning must contain "Uncommitted changes" or "skipping"
   setup_git_claude_home
   trap "teardown_fake_claude_home" RETURN
 
@@ -175,13 +175,7 @@ run_test_ac4_wrapper_template_has_timeout() {
   local template_file="$_PROJECT_ROOT/templates/shell-wrapper.sh"
 
   if [[ ! -f "$template_file" ]]; then
-    printf "  SKIP  AC4: templates/shell-wrapper.sh not yet created — checking PLAN.md spec\n"
-
-    # Spec-driven: verify the spec itself defines the 2s timeout
-    local plan_content
-    plan_content="$(cat "$_PROJECT_ROOT/PLAN.md")"
-    assert_contains "$plan_content" "timeout 2" \
-      "AC4: PLAN.md specifies 'timeout 2' in wrapper template"
+    _fail "AC4: templates/shell-wrapper.sh exists" "file missing"
     return 0
   fi
 
@@ -196,14 +190,7 @@ run_test_ac4_wrapper_template_uses_background_subshell() {
   local template_file="$_PROJECT_ROOT/templates/shell-wrapper.sh"
 
   if [[ ! -f "$template_file" ]]; then
-    printf "  SKIP  AC4: templates/shell-wrapper.sh not yet created — checking PLAN.md spec\n"
-
-    local plan_content
-    plan_content="$(cat "$_PROJECT_ROOT/PLAN.md")"
-    assert_contains "$plan_content" "disown" \
-      "AC4: PLAN.md specifies 'disown' to detach background pull"
-    assert_contains "$plan_content" ") &" \
-      "AC4: PLAN.md specifies background subshell ) &"
+    _fail "AC4: templates/shell-wrapper.sh exists" "file missing"
     return 0
   fi
 
@@ -218,12 +205,7 @@ run_test_ac4_wrapper_template_calls_command_claude() {
   local template_file="$_PROJECT_ROOT/templates/shell-wrapper.sh"
 
   if [[ ! -f "$template_file" ]]; then
-    printf "  SKIP  AC4: templates/shell-wrapper.sh not yet created — checking PLAN.md spec\n"
-
-    local plan_content
-    plan_content="$(cat "$_PROJECT_ROOT/PLAN.md")"
-    assert_contains "$plan_content" 'command claude "$@"' \
-      "AC4: PLAN.md wrapper calls 'command claude \"\$@\"' to avoid recursion"
+    _fail "AC4: templates/shell-wrapper.sh exists" "file missing"
     return 0
   fi
 
@@ -248,7 +230,7 @@ run_test_ac4_background_pull_does_not_block() {
   local start_ts end_ts elapsed
   start_ts="$(date +%s)"
 
-  # This is the wrapper pattern from PLAN.md — background, disowned, timeout 2
+  # This is the wrapper pattern — background, disowned, timeout 2
   (timeout 2 git -C "$CLAUDE_HOME" pull --rebase -q 2>/dev/null || true) &
   disown $! 2>/dev/null || true
 

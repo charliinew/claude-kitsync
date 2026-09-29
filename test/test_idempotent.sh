@@ -8,7 +8,7 @@ source "$_HELPERS_DIR/helpers.sh"
 
 # ---------------------------------------------------------------------------
 # _simulate_install — replicates what install.sh is expected to do
-# per PLAN.md, without requiring install.sh to exist yet:
+# per the original design, without requiring install.sh to exist yet:
 #   1. Copy bin/kitsync to $FAKE_BIN_DIR
 #   2. Ensure $PATH export in RC file
 #   3. Inject wrapper markers in RC file if absent

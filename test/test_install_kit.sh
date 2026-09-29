@@ -24,7 +24,7 @@ _source_install_kit_lib() {
 }
 
 # ---------------------------------------------------------------------------
-# _simulate_kit_merge — replicates the selective copy logic from PLAN.md
+# _simulate_kit_merge — replicates the selective copy logic of install-kit
 # without requiring lib/install-kit.sh to exist yet.
 #
 # Args:
@@ -304,7 +304,7 @@ run_test_ac8_via_lib_if_available() {
   echo '{"localSetting": true}' > "$CLAUDE_HOME/settings.json"
 
   # Call the real function — must not overwrite settings.json
-  # The function signature from PLAN.md: install_kit <src_dir> (or similar)
+  # Expected function signature: install_kit <src_dir> (or similar)
   # We pass SKIP as conflict strategy assuming a non-interactive flag
   install_kit "$kit_dir" 2>/dev/null || true
 

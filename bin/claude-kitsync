@@ -40,7 +40,7 @@ source "$KITSYNC_ROOT/lib/crypto.sh"
 # ---------------------------------------------------------------------------
 # version
 # ---------------------------------------------------------------------------
-KITSYNC_VERSION="$(<"${KITSYNC_ROOT}/VERSION" 2>/dev/null || echo "dev")"
+KITSYNC_VERSION="$(cat "${KITSYNC_ROOT}/VERSION" 2>/dev/null || echo "dev")"
 
 # ---------------------------------------------------------------------------
 # _usage — print help text
@@ -318,7 +318,7 @@ cmd_upgrade() {
   fi
 
   local current_version
-  current_version="$(<"$KITSYNC_ROOT/VERSION" 2>/dev/null || echo "0.0.0")"
+  current_version="$(cat "$KITSYNC_ROOT/VERSION" 2>/dev/null || echo "0.0.0")"
   local latest_version="${latest_tag#v}"
 
   if [[ "$current_version" == "$latest_version" ]]; then
@@ -343,15 +343,17 @@ cmd_upgrade() {
   fi
 
   local new_version
-  new_version="$(<"$KITSYNC_ROOT/VERSION" 2>/dev/null || echo "$latest_tag")"
+  new_version="$(cat "$KITSYNC_ROOT/VERSION" 2>/dev/null || echo "$latest_tag")"
   log_success "Upgraded: v$current_version → v$new_version"
 }
 
 # ---------------------------------------------------------------------------
 # _post_pull_hook — internal hook called by shell wrapper after background pull
-# Normalises paths in settings.json.
+# Decrypts encrypted files (if enabled), then normalises paths in settings.json.
 # ---------------------------------------------------------------------------
 _post_pull_hook() {
+  paths_filter_setup 2>/dev/null || true
+  crypto_decrypt_all 2>/dev/null || true
   normalize_paths 2>/dev/null || true
   paths_detokenize 2>/dev/null || true
 }

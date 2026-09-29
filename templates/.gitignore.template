@@ -20,6 +20,15 @@
 !scripts/**
 !rules/
 !rules/**
+!commands/
+!commands/**
+!output-styles/
+!output-styles/**
+!workflows/
+!workflows/**
+!themes/
+!themes/**
+!keybindings.json
 
 # Méta
 !.gitignore
@@ -27,8 +36,11 @@
 !.kitsync/**
 !settings.template.json
 
-# Encryption key — never synced
-.kitsync/encryption.key
+# Machine-local kitsync state — never synced
+.kitsync/encryption.key*
+.kitsync/pending-notice
+.kitsync/conflict_pending
+.kitsync/*.tmp.*
 
 # JAMAIS syncé (explicite) — these override the !*/ rule above
 .credentials.json

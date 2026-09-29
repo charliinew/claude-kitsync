@@ -13,18 +13,23 @@ readonly SYNC_WHITELIST=(
   "hooks/"
   "scripts/"
   "rules/"
+  "commands/"
+  "output-styles/"
+  "workflows/"
+  "themes/"
+  "keybindings.json"
   ".gitignore"
   ".kitsync/"
   "settings.template.json"
 )
 
 # User-configurable categories (infra items are always synced regardless of selection)
-readonly SYNC_USER_CATEGORIES=("agents" "skills" "hooks" "scripts" "rules" "settings.json" "CLAUDE.md")
+readonly SYNC_USER_CATEGORIES=("agents" "skills" "hooks" "scripts" "rules" "commands" "output-styles" "workflows" "themes" "keybindings.json" "settings.json" "CLAUDE.md")
 
 # Map a user category name to its whitelist path
 _sync_category_to_path() {
   case "$1" in
-    agents|skills|hooks|scripts|rules) printf '%s/' "$1" ;;
+    agents|skills|hooks|scripts|rules|commands|output-styles|workflows|themes) printf '%s/' "$1" ;;
     *) printf '%s' "$1" ;;
   esac
 }
@@ -35,6 +40,62 @@ _sync_is_infra() {
     ".gitignore"|".kitsync/"|"settings.template.json") return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# ---------------------------------------------------------------------------
+# _gitignore_migrate — bring an existing allowlist .gitignore up to date.
+# `init` never overwrites an existing .gitignore, so rules added in later
+# releases are appended here (only the missing ones, idempotent).
+# Also untracks machine-local runtime files that older versions committed.
+# ---------------------------------------------------------------------------
+_gitignore_migrate() {
+  local gi="$CLAUDE_HOME/.gitignore"
+  # Only touch kitsync-style allowlists (deny-all first rule)
+  grep -qx '\*' "$gi" 2>/dev/null || return 0
+
+  local rules=(
+    "!commands/" "!commands/**"
+    "!output-styles/" "!output-styles/**"
+    "!workflows/" "!workflows/**"
+    "!themes/" "!themes/**"
+    "!keybindings.json"
+    ".kitsync/encryption.key*"
+    ".kitsync/pending-notice"
+    ".kitsync/conflict_pending"
+    ".kitsync/*.tmp.*"
+  )
+  local missing=() r
+  for r in "${rules[@]}"; do
+    grep -qxF "$r" "$gi" 2>/dev/null || missing+=("$r")
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    printf '\n# Added by claude-kitsync %s\n' "${KITSYNC_VERSION:-upgrade}" >> "$gi"
+    printf '%s\n' "${missing[@]}" >> "$gi"
+  fi
+
+  local tracked
+  tracked="$(git -C "$CLAUDE_HOME" ls-files -- '.kitsync/encryption.key*' \
+    .kitsync/pending-notice .kitsync/conflict_pending 2>/dev/null || true)"
+  if [[ -n "$tracked" ]]; then
+    printf '%s\n' "$tracked" | while IFS= read -r _f; do
+      git -C "$CLAUDE_HOME" rm --cached -q -- "$_f" 2>/dev/null || true
+    done
+    log_warn "Untracked machine-local files from git: $(printf '%s' "$tracked" | tr '\n' ' ')"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# _sync_prepare_repo — per-run repo maintenance shared by push and pull:
+# path-token filter, .gitignore migration, plaintext untracking under encryption.
+# ---------------------------------------------------------------------------
+_sync_prepare_repo() {
+  paths_filter_setup 2>/dev/null || true
+  _gitignore_migrate 2>/dev/null || true
+  if _crypto_is_enabled 2>/dev/null; then
+    _crypto_gitignore_block add 2>/dev/null || true
+    git -C "$CLAUDE_HOME" rm --cached -q --ignore-unmatch \
+      settings.json settings.template.json 2>/dev/null || true
+  fi
 }
 
 # Returns comma-separated push categories from config, or all if unset
@@ -70,7 +131,8 @@ _sync_item_in_list() {
 # _is_dirty — returns 0 if working tree has uncommitted changes, 1 if clean
 # ---------------------------------------------------------------------------
 _is_dirty() {
-  [[ -n "$(git -C "$CLAUDE_HOME" status --porcelain 2>/dev/null)" ]]
+  # Untracked files never block a rebase — only tracked changes count
+  [[ -n "$(git -C "$CLAUDE_HOME" status --porcelain --untracked-files=no 2>/dev/null)" ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -102,9 +164,9 @@ _prompt_conflict_resolution() {
         log_warn "Hard reset failed — try manually: git -C \"$CLAUDE_HOME\" reset --hard origin/$_branch"
         return 1
       }
+      crypto_decrypt_all 2>/dev/null || true
       normalize_paths
       paths_detokenize
-      crypto_decrypt_all 2>/dev/null || true
       log_success "Pulled remote version — local state updated."
       ;;
     2)
@@ -122,14 +184,17 @@ _prompt_conflict_resolution() {
 #
 # Strategy:
 #   1. Skip with warning if dirty working tree (never lose local changes)
-#   2. git pull --rebase --autostash -X theirs -q (repo wins on conflict)
+#   2. git pull --rebase --autostash -X ours (remote wins on conflict).
+#      During a rebase the sides are swapped: "ours" is the upstream being
+#      rebased onto (the remote), "theirs" is the local commits being replayed.
 #   3. On failure: abort rebase and warn
-#   4. Run normalize_paths after successful pull
+#   4. Decrypt, then normalise paths after successful pull
 # ---------------------------------------------------------------------------
 sync_pull() {
   local force="${1:-}"
 
   require_git_repo
+  _sync_prepare_repo
 
   if ! _has_remote; then
     log_warn "No remote configured — skipping pull."
@@ -159,7 +224,7 @@ sync_pull() {
 
   log_step "Pulling from remote..."
 
-  # Pre-fetch so we can warn about files that -X theirs would silently overwrite
+  # Pre-fetch so we can warn about local commits that -X ours will override
   if git -C "$CLAUDE_HOME" fetch origin -q 2>/dev/null; then
     if git -C "$CLAUDE_HOME" rev-parse --verify "origin/$_branch" &>/dev/null; then
       local _local_changed _remote_changed _would_overwrite
@@ -176,7 +241,7 @@ sync_pull() {
           while IFS= read -r _f; do
             log_warn "  • $_f"
           done <<< "$_would_overwrite"
-          log_warn "Remote version will be kept (-X theirs). Your local commits on these files will be overwritten."
+          log_warn "Remote version will be kept on conflicting hunks. Your local changes to these hunks will be overwritten."
           printf "\n"
         fi
       fi
@@ -187,9 +252,9 @@ sync_pull() {
   local _pre_pull_sha
   _pre_pull_sha="$(git -C "$CLAUDE_HOME" rev-parse HEAD 2>/dev/null || true)"
 
-  # Step 2: rebase pull with autostash and theirs strategy (repo wins on conflict)
+  # Step 2: rebase pull with autostash; -X ours = remote wins (rebase swaps sides)
   local _pull_out
-  if _pull_out="$(git -C "$CLAUDE_HOME" pull --rebase --autostash --allow-unrelated-histories -X theirs 2>&1)"; then
+  if _pull_out="$(git -C "$CLAUDE_HOME" pull --rebase --autostash --allow-unrelated-histories -X ours 2>&1)"; then
     log_success "Pull complete."
 
     # Selective pull: restore categories not in user's pull selection
@@ -211,11 +276,10 @@ sync_pull() {
       done
     fi
 
-    # Step 4: normalise absolute paths after pull
+    # Step 4: decrypt encrypted files (if enabled), then normalise absolute paths
+    crypto_decrypt_all 2>/dev/null || true
     normalize_paths
     paths_detokenize
-    # Step 5: decrypt encrypted files if encryption is enabled
-    crypto_decrypt_all 2>/dev/null || true
   else
     # Step 3: show conflict details, abort rebase, offer interactive resolution
     log_warn "Pull/rebase failed — checking for conflicts..."
@@ -330,6 +394,9 @@ sync_push() {
     return 0
   fi
 
+  # Filter/gitignore maintenance — after the dry-run exit so a preview never mutates the repo
+  _sync_prepare_repo
+
   # Encrypt sensitive files before staging (when enabled)
   local _enc_staged_files=()
   if _crypto_is_enabled 2>/dev/null; then
@@ -339,10 +406,13 @@ sync_push() {
     done < <(crypto_encrypt_all 2>/dev/null || true)
   fi
 
-  # Tokenize portable paths in settings.json before committing so the repo
-  # is portable across machines and usernames ($HOME/.claude → __CLAUDE_HOME__,
-  # $HOME → __HOME__). paths_detokenize restores local state after push.
-  paths_tokenize 2>/dev/null || true
+  # Keep settings.template.json in sync with settings.json (plaintext only —
+  # under encryption the template is ignored and untracked).
+  if ! _crypto_is_enabled 2>/dev/null && \
+     [[ -f "$CLAUDE_HOME/settings.template.json" ]] && [[ -f "$CLAUDE_HOME/settings.json" ]] && \
+     _sync_item_in_list "settings.json" "$(_sync_get_push_items)"; then
+    paths_tokenize_stream < "$CLAUDE_HOME/settings.json" > "$CLAUDE_HOME/settings.template.json" 2>/dev/null || true
+  fi
 
   _plog_step "Staging whitelisted files..."
 
@@ -373,30 +443,38 @@ sync_push() {
     fi
   done
 
+  # Re-run the path-token clean filter even if git's stat cache thinks
+  # settings.json is unchanged (first push after the filter was configured)
+  if ! _crypto_is_enabled 2>/dev/null && _sync_item_in_list "settings.json" "$_push_items"; then
+    git -C "$CLAUDE_HOME" add --renormalize -- settings.json 2>/dev/null || true
+  fi
+
   # Final safety: verify .credentials.json not staged after add (--name-only = one filename per line)
   if git -C "$CLAUDE_HOME" diff --cached --name-only 2>/dev/null | grep -q "^\.credentials\.json$"; then
     log_error "CRITICAL: .credentials.json ended up staged — aborting commit!"
     git -C "$CLAUDE_HOME" reset HEAD ".credentials.json" 2>/dev/null || true
-    paths_detokenize 2>/dev/null || true
     exit 1
   fi
 
-  # Check if there is anything to commit
+  # Check if there is anything to commit — local commits not yet pushed
+  # (earlier failed push, path-token migration) still need to go out
   if git -C "$CLAUDE_HOME" diff --cached --quiet 2>/dev/null; then
-    paths_detokenize 2>/dev/null || true
-    _plog_info "Nothing to commit — working tree clean."
-    return 0
-  fi
-
-  _plog_step "Committing: $commit_msg"
-  local _commit_out
-  if _commit_out="$(git -C "$CLAUDE_HOME" commit -m "$commit_msg" 2>&1)"; then
-    [[ "$_auto" == false ]] && \
-      printf "%s\n" "$_commit_out" | grep -Ev "^[[:space:]]+(create|delete) mode " || true
+    local _unpushed
+    _unpushed="$(git -C "$CLAUDE_HOME" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 1)"
+    if [[ "$_unpushed" == "0" ]]; then
+      _plog_info "Nothing to commit — working tree clean."
+      return 0
+    fi
   else
-    paths_detokenize 2>/dev/null || true
-    printf "%s\n" "$_commit_out" >&2
-    exit 1
+    _plog_step "Committing: $commit_msg"
+    local _commit_out
+    if _commit_out="$(git -C "$CLAUDE_HOME" commit -m "$commit_msg" 2>&1)"; then
+      [[ "$_auto" == false ]] && \
+        printf "%s\n" "$_commit_out" | grep -Ev "^[[:space:]]+(create|delete) mode " || true
+    else
+      printf "%s\n" "$_commit_out" >&2
+      exit 1
+    fi
   fi
 
   _plog_step "Pushing to remote..."
@@ -407,9 +485,6 @@ sync_push() {
     git -C "$CLAUDE_HOME" push -q -u origin "$_branch" 2>/dev/null || \
       log_warn "Auto-push failed — run 'claude-kitsync push' to retry."
   fi
-
-  # Restore absolute paths locally — tokens are only for the git repo
-  paths_detokenize 2>/dev/null || true
 
   _plog_success "Push complete."
 }

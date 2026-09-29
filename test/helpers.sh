@@ -175,7 +175,7 @@ setup_git_claude_home() {
   if [[ -f "$project_root/templates/.gitignore.template" ]]; then
     cp "$project_root/templates/.gitignore.template" "$CLAUDE_HOME/.gitignore"
   else
-    # Minimal allowlist matching PLAN.md spec — used when template not yet created
+    # Minimal allowlist — used when template not yet created
     cat > "$CLAUDE_HOME/.gitignore" << 'GITIGNORE'
 # claude-kitsync — allowlist strict
 *

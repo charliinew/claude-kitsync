@@ -45,10 +45,10 @@ _generate_settings_template() {
   # Use anchored multi-user patterns — matches /Users/<any>/.claude (macOS)
   # and /home/<any>/.claude (Linux), regardless of who owns the settings file.
   # This ensures portability even if settings.json came from another machine.
-  cp "$settings_src" "$settings_tpl"
-  sed -i.bak "s|/Users/[^/]*/.claude|__CLAUDE_HOME__|g" "$settings_tpl" 2>/dev/null || true
-  sed -i.bak "s|/home/[^/]*/.claude|__CLAUDE_HOME__|g"  "$settings_tpl" 2>/dev/null || true
-  rm -f "${settings_tpl}.bak"
+  paths_tokenize_stream < "$settings_src" > "$settings_tpl"
+  # Settings may have come from another machine — catch foreign home dirs too
+  _sed_inplace "s|/Users/[^/]*/\.claude|__CLAUDE_HOME__|g" "$settings_tpl" 2>/dev/null || true
+  _sed_inplace "s|/home/[^/]*/\.claude|__CLAUDE_HOME__|g"  "$settings_tpl" 2>/dev/null || true
 
   log_success "Created settings.template.json with tokenised paths."
 }
@@ -118,7 +118,8 @@ _init_prompt_file_conflict() {
 #   - local-only files   → left as-is (staged later in Step 5)
 # ---------------------------------------------------------------------------
 _init_resolve_conflicts() {
-  local _whitelist=("settings.json" "CLAUDE.md" "agents" "skills" "hooks" "scripts" "rules")
+  local _whitelist=("settings.json" "CLAUDE.md" "agents" "skills" "hooks" "scripts" "rules" \
+    "commands" "output-styles" "workflows" "themes" "keybindings.json")
 
   local _conflict_count=0
   local _pulled_count=0
@@ -300,9 +301,12 @@ _prompt_sync_items() {
   fi
 
   local labels=("Agents  (agents/)" "Skills  (skills/)" "Hooks  (hooks/)" \
-    "Scripts  (scripts/)" "Rules  (rules/)" \
+    "Scripts  (scripts/)" "Rules  (rules/)" "Commands  (commands/)" \
+    "Output styles  (output-styles/)" "Workflows  (workflows/)" "Themes  (themes/)" \
+    "Keybindings  (keybindings.json)" \
     "Settings  (settings.json)" "Instructions  (CLAUDE.md)")
-  local keys=("agents" "skills" "hooks" "scripts" "rules" "settings.json" "CLAUDE.md")
+  local keys=("agents" "skills" "hooks" "scripts" "rules" "commands" "output-styles" \
+    "workflows" "themes" "keybindings.json" "settings.json" "CLAUDE.md")
 
   local selected_indices
   selected_indices="$(_select_multi "$prompt" "${labels[@]}")"
@@ -449,7 +453,7 @@ cmd_init() {
       cp "$template_path" "$gitignore_dest"
       log_success ".gitignore installed."
     fi
-  else
+  elif [[ ! -f "$gitignore_dest" ]]; then
     log_warn "Template not found — writing minimal .gitignore..."
     cat > "$gitignore_dest" <<'GITIGNORE'
 # claude-kitsync — allowlist strict
@@ -478,6 +482,10 @@ cache/
 GITIGNORE
     log_success "Minimal .gitignore written."
   fi
+  # Bring older/minimal allowlists up to date, and register the path-token filter
+  # before any remote content is checked out
+  _gitignore_migrate
+  paths_filter_setup
 
   # ---------------------------------------------------------------------------
   # Step 3: Configure remote
@@ -599,9 +607,15 @@ GITIGNORE
     "hooks/"
     "scripts/"
     "rules/"
+    "commands/"
+    "output-styles/"
+    "workflows/"
+    "themes/"
+    "keybindings.json"
     ".gitignore"
     ".kitsync/"
   )
+
 
   for item in "${whitelist_items[@]}"; do
     local full_path="$CLAUDE_HOME/$item"

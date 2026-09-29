@@ -25,7 +25,6 @@ readonly KIT_COPYABLE_DIRS=(
   "hooks"
   "rules"
   "scripts"
-  ".kitsync"
 )
 
 readonly KIT_COPYABLE_FILES=(
@@ -41,7 +40,7 @@ _find_kit_root() {
   local tmp_dir="$1"
   # Local copy — avoids bash 3.2 scoping issue where readonly globals declared
   # in a sourced script are invisible outside the calling function's scope.
-  local _dirs=(agents skills hooks rules scripts .kitsync)
+  local _dirs=(agents skills hooks rules scripts)
 
   # Fast path: any copyable dir exists at root → standard layout
   for dir_name in "${_dirs[@]}"; do
@@ -337,7 +336,27 @@ cmd_install() {
     local kit_root
     kit_root="$(_find_kit_root "$tmp_dir")"
 
+    # hooks/ and scripts/ are executed by Claude Code — require explicit consent
+    local _allow_exec=false _exec_found=""
+    for dir_name in hooks scripts; do
+      [[ -d "$kit_root/$dir_name" ]] && _exec_found="${_exec_found:+$_exec_found, }$dir_name/"
+    done
+    if [[ -n "$_exec_found" ]]; then
+      log_warn "This kit ships executable content ($_exec_found) that Claude Code will run."
+      log_warn "Review it first: $clone_url"
+      local _ans=""
+      if printf "  Install %s? [y/N] " "$_exec_found" >/dev/tty 2>/dev/null && \
+         read -r _ans </dev/tty 2>/dev/null && [[ "$_ans" =~ ^[yY] ]]; then
+        _allow_exec=true
+      else
+        log_info "Skipping $_exec_found"
+      fi
+    fi
+
     for dir_name in "${KIT_COPYABLE_DIRS[@]}"; do
+      if [[ "$_allow_exec" == false ]] && { [[ "$dir_name" == "hooks" ]] || [[ "$dir_name" == "scripts" ]]; }; then
+        continue
+      fi
       local kit_dir="$kit_root/$dir_name"
       if [[ -d "$kit_dir" ]]; then
         _copy_kit_dir "$kit_dir" "$CLAUDE_HOME"

@@ -147,27 +147,67 @@ _crypto_decrypt_file() {
 
 # ---------------------------------------------------------------------------
 # crypto_encrypt_all — encrypt all KITSYNC_ENCRYPT_FILES before push
-# Returns list of .enc files that were created (one per line).
+# Plaintext is tokenized first (portable paths), and an existing .enc is kept
+# as-is when its content is unchanged — AES-CBC uses a random salt, so
+# re-encrypting identical content would create a spurious commit every push.
+# Returns list of .enc files (one per line).
 # ---------------------------------------------------------------------------
 crypto_encrypt_all() {
   _crypto_is_enabled || return 0
 
-  local file enc_file
+  local file enc_file src plain_tmp prev_tmp
   for file in "${KITSYNC_ENCRYPT_FILES[@]}"; do
-    local src="$CLAUDE_HOME/$file"
+    src="$CLAUDE_HOME/$file"
     enc_file="$CLAUDE_HOME/${file}.enc"
     if [[ ! -f "$src" ]]; then
       continue
     fi
+
+    plain_tmp="$CLAUDE_HOME/.kitsync/.plain.tmp.$$"
+    prev_tmp="$CLAUDE_HOME/.kitsync/.prev.tmp.$$"
+    mkdir -p "$CLAUDE_HOME/.kitsync" 2>/dev/null || true
+    ( umask 077; paths_tokenize_stream < "$src" > "$plain_tmp" )
+
+    if [[ -f "$enc_file" ]] && \
+       _crypto_decrypt_file "$enc_file" "$prev_tmp" 2>/dev/null && \
+       cmp -s "$plain_tmp" "$prev_tmp"; then
+      rm -f "$plain_tmp" "$prev_tmp"
+      printf '%s\n' "$enc_file"
+      continue
+    fi
+    rm -f "$prev_tmp"
+
     log_step "Encrypting $file..."
-    if _crypto_encrypt_file "$src" "$enc_file"; then
+    if _crypto_encrypt_file "$plain_tmp" "$enc_file"; then
       printf '%s\n' "$enc_file"
     fi
+    rm -f "$plain_tmp"
   done
 }
 
 # ---------------------------------------------------------------------------
-# crypto_decrypt_all — decrypt all .enc files after pull
+# _crypto_restore_from_history <file> — recreate a plaintext file that a pull
+# removed from the index (another machine enabled encryption) when it cannot
+# be decrypted locally. Uses the last committed plaintext version.
+# ---------------------------------------------------------------------------
+_crypto_restore_from_history() {
+  local file="$1" dst="$CLAUDE_HOME/$1" last
+  [[ -f "$dst" ]] && return 0
+  last="$(git -C "$CLAUDE_HOME" rev-list -1 HEAD -- "$file" 2>/dev/null || true)"
+  [[ -n "$last" ]] || return 0
+  # $last is the commit that removed (or last touched) the file — try it, then its parent
+  if git -C "$CLAUDE_HOME" show "$last:$file" > "$dst" 2>/dev/null || \
+     git -C "$CLAUDE_HOME" show "$last^:$file" > "$dst" 2>/dev/null; then
+    chmod 600 "$dst" 2>/dev/null || true
+    log_warn "Restored $file from git history (could not decrypt ${file}.enc)."
+  else
+    rm -f "$dst"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# crypto_decrypt_all — decrypt all .enc files after pull, then resolve path
+# tokens (decrypted content bypasses the git smudge filter).
 # ---------------------------------------------------------------------------
 crypto_decrypt_all() {
   _crypto_is_enabled || return 0
@@ -175,12 +215,31 @@ crypto_decrypt_all() {
   local file enc_file
   for file in "${KITSYNC_ENCRYPT_FILES[@]}"; do
     enc_file="$CLAUDE_HOME/${file}.enc"
-    local dst="$CLAUDE_HOME/$file"
-    if [[ ! -f "$enc_file" ]]; then
-      continue
+    if [[ -f "$enc_file" ]]; then
+      _crypto_decrypt_file "$enc_file" "$CLAUDE_HOME/$file" || true
     fi
-    _crypto_decrypt_file "$enc_file" "$dst" || true
+    _crypto_restore_from_history "$file"
   done
+  paths_detokenize 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
+# _crypto_gitignore_block <add|remove> — when encryption is on, plaintext
+# settings files must be ignored so they are never staged again.
+# .gitignore is synced, which matches KITSYNC_ENCRYPT being synced in config.
+# ---------------------------------------------------------------------------
+_crypto_gitignore_block() {
+  local gi="$CLAUDE_HOME/.gitignore"
+  local begin="# kitsync-encrypt-start" end="# kitsync-encrypt-end"
+  local tmp; tmp="$(mktemp)"
+  if [[ -f "$gi" ]]; then
+    awk -v b="$begin" -v e="$end" '$0==b{skip=1;next} $0==e{skip=0;next} !skip' "$gi" > "$tmp"
+  fi
+  if [[ "$1" == "add" ]]; then
+    printf '%s\n# Encryption enabled — plaintext never synced\nsettings.json\nsettings.template.json\n%s\n' \
+      "$begin" "$end" >> "$tmp"
+  fi
+  mv "$tmp" "$gi"
 }
 
 # ---------------------------------------------------------------------------
@@ -193,8 +252,16 @@ cmd_encrypt() {
     enable)
       _crypto_ensure_key || return 1
       _crypto_set_enabled "true"
+      _crypto_gitignore_block add
+      # Stop tracking plaintext copies — the removal is committed on next push
+      git -C "$CLAUDE_HOME" rm --cached -q --ignore-unmatch \
+        settings.json settings.template.json 2>/dev/null || true
       log_success "Encryption enabled."
       log_info "Run 'claude-kitsync push' — settings.json will be committed as settings.json.enc"
+      if [[ -n "$(git -C "$CLAUDE_HOME" log -1 --format=%h -- settings.json 2>/dev/null)" ]]; then
+        log_warn "Earlier plaintext versions of settings.json remain in git history."
+        log_warn "Rotate any secret they contained, or rewrite history (git filter-repo)."
+      fi
       ;;
 
     disable)
@@ -203,8 +270,10 @@ cmd_encrypt() {
         return 0
       fi
       _crypto_set_enabled "false"
+      _crypto_gitignore_block remove
+      git -C "$CLAUDE_HOME" rm --cached -q --ignore-unmatch settings.json.enc 2>/dev/null || true
       log_success "Encryption disabled."
-      log_warn "Your settings.json.enc in git still exists — push a plaintext settings.json to replace it."
+      log_info "Next 'claude-kitsync push' commits settings.json in plaintext and drops settings.json.enc."
       ;;
 
     rotate)
@@ -222,6 +291,7 @@ cmd_encrypt() {
       log_success "New key generated: $key_file"
       log_warn "Re-encrypt and push now: claude-kitsync push"
       log_warn "Update the key on all other machines before they pull."
+      log_warn "The old key ($backup) still decrypts earlier .enc versions in git history — keep it private."
       ;;
 
     status)

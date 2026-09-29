@@ -29,7 +29,7 @@ _source_paths_lib() {
 }
 
 # ---------------------------------------------------------------------------
-# _apply_normalize_paths_sed — applies the sed transform described in PLAN.md
+# _apply_normalize_paths_sed — applies the sed transform used by normalize_paths
 # directly, without requiring lib/paths.sh to exist yet.
 # This lets us test the BEHAVIOUR (the expected transform) independently
 # of whether the implementation file exists.
@@ -114,7 +114,7 @@ run_test_ac6_sed_handles_multiple_occurrences() {
   local machine_b_home="$CLAUDE_HOME/home_bob"
   mkdir -p "$machine_b_home"
 
-  # Four absolute paths as documented in PLAN.md
+  # Four absolute paths typical of a real settings.json
   cat > "$CLAUDE_HOME/settings.json" << 'EOF'
 {
   "cmd1": "python3 /Users/alice/.claude/hooks/rm_to_trash.py",
