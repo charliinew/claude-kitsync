@@ -13,35 +13,49 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Create release tarball
         run: |
           tar -czf claude-kitsync-${{ github.ref_name }}.tar.gz \
-            bin/ lib/ kit/ templates/ VERSION README.md install.sh
+            bin/ lib/ kit/ templates/ completions/ VERSION README.md install.sh
 
       - name: Generate SHA256SUMS
         run: |
           sha256sum claude-kitsync-${{ github.ref_name }}.tar.gz > SHA256SUMS
 
+      # `secrets` is not available in step-level `if:` — expose it through a step output
+      - name: Check for signing key
+        id: gpg
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          if [ -n "$GPG_PRIVATE_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Import GPG key
-        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
-        run: echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+        if: steps.gpg.outputs.enabled == 'true'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
 
       - name: Sign release artifacts
-        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        if: steps.gpg.outputs.enabled == 'true'
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
-          echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
+          echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
             --detach-sign --armor claude-kitsync-${{ github.ref_name }}.tar.gz
-          echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
+          echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
             --detach-sign --armor SHA256SUMS
 
       - name: Create GitHub Release (with signatures)
-        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        if: steps.gpg.outputs.enabled == 'true'
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
@@ -52,7 +66,7 @@ jobs:
             SHA256SUMS.asc
 
       - name: Create GitHub Release (without signatures)
-        if: ${{ secrets.GPG_PRIVATE_KEY == '' }}
+        if: steps.gpg.outputs.enabled != 'true'
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
@@ -67,14 +81,15 @@ jobs:
           URL="https://github.com/charliinew/claude-kitsync/archive/refs/tags/${TAG}.tar.gz"
           curl -fsSL "$URL" -o source-archive.tar.gz
           SHA=$(sha256sum source-archive.tar.gz | awk '{print $1}')
-          echo "sha256=$SHA" >> $GITHUB_OUTPUT
-          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
 
       - name: Update Homebrew formula on main
+        env:
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ steps.sha256.outputs.sha256 }}
+          URL: ${{ steps.sha256.outputs.url }}
         run: |
-          TAG=${{ github.ref_name }}
-          SHA=${{ steps.sha256.outputs.sha256 }}
-          URL=${{ steps.sha256.outputs.url }}
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -84,5 +99,9 @@ jobs:
           sed -i "s|sha256 \".*\"|sha256 \"${SHA}\"|" Formula/claude-kitsync.rb
 
           git add Formula/claude-kitsync.rb
-          git commit -m "chore(homebrew): update formula to ${TAG}"
-          git push origin main
+          if git diff --cached --quiet; then
+            echo "Formula already up to date"
+          else
+            git commit -m "chore(homebrew): update formula to ${TAG}"
+            git push origin main
+          fi
