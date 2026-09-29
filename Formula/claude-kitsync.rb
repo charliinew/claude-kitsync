@@ -1,8 +1,8 @@
 class ClaudeKitsync < Formula
   desc "Sync Claude Code configuration across machines via git"
   homepage "https://github.com/charliinew/claude-kitsync"
-  url "https://github.com/charliinew/claude-kitsync/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 "a3a6d27766fa8e205882aee7024f3bfd65b62c1faf756beaed42df79529c787b"
+  url "https://github.com/charliinew/claude-kitsync/archive/refs/tags/v1.1.2.tar.gz"
+  sha256 "388f468cf4ae19587d44c67279e0424a54119a4438af39d9655a75e15e2e86b9"
   license "MIT"
   head "https://github.com/charliinew/claude-kitsync.git", branch: "main"
 
