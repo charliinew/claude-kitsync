@@ -1,9 +1,51 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **Working tree always dirty after push** — path tokens (`__CLAUDE_HOME__`, `__HOME__`) are now applied by a git clean/smudge filter (per-machine, in `.git/config` + `.git/info/attributes`) instead of rewriting `settings.json` in place. `pull` is no longer skipped after every push, and `settings.json` is never rewritten while Claude Code is running. Existing repos get a one-time `kitsync: portable path tokens` commit.
+- **Conflict side inverted** — `pull` used `-X theirs`, which during a rebase keeps the *local* commits. It now uses `-X ours` so the remote wins, as documented.
+- **`push` never sent pending local commits** when nothing new was staged (after an offline push or a migration commit).
+- **Encryption**: rotated key backups (`.kitsync/encryption.key.bak.*`) were pushed; plaintext `settings.json` stayed tracked and `settings.template.json` was pushed in clear. Enabling encryption now untracks both and ignores them; `.enc` content is tokenized and only re-encrypted when it changes (no more spurious commit on every push).
+- Background auto-pull now decrypts `settings.json.enc` (post-pull hook).
+- Machine-local state (`.kitsync/pending-notice`, `.kitsync/conflict_pending`) is no longer synced.
+- `normalize_paths` only touches `settings.json` (it used to rewrite every `*.json` under `~/.claude`, including runtime data).
+- `init` no longer overwrites an existing `.gitignore` when the template is missing.
+- `--version` printed an empty version on bash 3.2 (macOS default), which also broke the Homebrew formula test and `upgrade` version checks.
+- Release workflow never ran (`secrets` used in step-level `if:`), so no signed artifacts and a Homebrew formula stuck at v1.0.0.
+
+### Changed
+- New sync categories: `commands/`, `output-styles/`, `workflows/`, `themes/`, `keybindings.json`. Existing `.gitignore` files are migrated automatically on the next push/pull.
+- `settings.template.json` is regenerated on each push instead of being frozen at `init`.
+- `install <url>` no longer copies a kit's `.kitsync/`, and asks before installing `hooks/` or `scripts/` (code Claude Code executes).
+- CI: `actions/checkout@v7`, `ludeeus/action-shellcheck@2.0.0` (pinned). Release tarball now includes `completions/`.
+
 ## [1.1.2] — 2026-05-05
 
 ### Fixed
 - **`init` — per-file conflict resolution on initial commit**: when connecting to an existing remote, files that differ between local and remote now trigger a `[R]emote / [L]ocal / [P]ass` prompt instead of being silently overwritten. Remote-only files are pulled automatically; local-only files are staged as new additions.
+
+## [1.1.1] — 2026-05-05
+
+### Added
+- **Selective sync** — choose which categories are pushed and pulled (`KITSYNC_PUSH_ITEMS` / `KITSYNC_PULL_ITEMS`).
+- **`install --skill <url>`** — install only skills, including a single skill from a GitHub tree URL; flexible kit layout detection.
+- **`upgrade`** defaults to the latest stable GitHub release.
+
+### Fixed
+- Wrapper: auto-pull timeout no longer reported as a conflict; works without `timeout` (falls back to `gtimeout` or none); no stale `conflict_pending` files.
+
+## [1.1.0] — 2026-05-04
+
+### Added
+- **`profile`** — named remotes for multi-environment sync (work, perso…).
+- **`encrypt`** — opt-in AES-256-CBC encryption of `settings.json` before push.
+- **`diff`** — ahead/behind summary with incoming/outgoing diff viewer; interactive conflict resolution on pull.
+- **`publish`** — package and publish agents/skills as a kit on GitHub.
+- Portable path tokens (`__HOME__` in addition to `__CLAUDE_HOME__`); warning when a pull overrides local changes; notice after an auto-pull conflict.
+
+### Changed
+- CI runs on `macos-latest` and `ubuntu-latest`.
 
 ## [1.0.0] — 2026-05-03
 

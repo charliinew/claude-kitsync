@@ -34,7 +34,7 @@ Pulling synchronously before `claude` runs would add visible latency. Instead:
 User types: claude <prompt>
                │
                ├── background: git pull (max 2s, then timeout)
-               │                    └── post-pull: normalize_paths
+               │                    └── post-pull: decrypt .enc (if enabled), normalize_paths
                │
                └── foreground: command claude "$@"  ← no wait
 ```
@@ -49,19 +49,20 @@ User types: claude <prompt>
 |---|---|
 | `skip-if-dirty` | If uncommitted changes exist, skip the pull entirely (never overwrite local work) |
 | `--autostash` | If the tree is clean, git auto-stashes before rebase and restores after |
-| `-X ours` | On merge conflicts inside files, prefer the local version (safe default) |
+| `-X ours` | On conflicting hunks, keep the **remote** version. During a rebase the sides are swapped: "ours" is the upstream being rebased onto, "theirs" is the local commits being replayed |
 
-This means **local changes always win** — users must explicitly `kitsync push` to share changes.
+Uncommitted work is never lost (skip-if-dirty / autostash). For *committed* local changes that conflict with the remote, **the remote wins**; `pull` lists the affected files before rebasing.
 
-### Absolute Path Handling: sed Post-Pull + settings.template.json
+### Absolute Path Handling: git clean/smudge filter
 
 `settings.json` contains absolute paths like `/Users/alice/.claude/hooks/...`. These break when synced to a machine with a different username.
 
-**Two-layer solution:**
-1. `settings.template.json` — tokenised version committed to git (`__CLAUDE_HOME__` placeholders)
-2. `normalize_paths()` — regex replacement run after every pull: any path matching `/*/\.claude` → `$HOME/.claude`
+**Solution:** `paths_filter_setup()` registers a `kitsync-paths` filter in `.git/config` and binds it to `settings.json` in `.git/info/attributes` (both per-machine, never synced):
 
-This means `settings.json` stays usable on the local machine while the committed copy is portable.
+- **clean** (working tree → repo): `$HOME/.claude` → `__CLAUDE_HOME__`, `$HOME` → `__HOME__`
+- **smudge** (repo → working tree): the reverse, with the current machine's `$HOME`
+
+The working copy always holds real paths and never looks modified after a push; the committed copy is portable. `normalize_paths()` additionally rewrites foreign `/Users/<x>/.claude` / `/home/<x>/.claude` paths in `settings.json` after a pull (legacy content). Content that bypasses git (decrypted `settings.json.enc`) is detokenized explicitly. On first setup, a repo whose `settings.json` was committed with absolute paths gets a one-time migration commit.
 
 ### Shell Wrapper: Function (not PATH manipulation)
 
@@ -100,7 +101,7 @@ claude-kitsync/
 │   └── kitsync                 # CLI dispatcher — sources all libs, case statement
 ├── lib/
 │   ├── core.sh                 # CLAUDE_HOME, logging (log_info/warn/error/success)
-│   ├── paths.sh                # normalize_paths(), paths_tokenize(), paths_detokenize()
+│   ├── paths.sh                # normalize_paths(), paths_filter_setup(), token streams
 │   ├── sync.sh                 # sync_pull(), sync_push(), sync_status()
 │   ├── wrapper.sh              # generate_wrapper(), install_wrapper_zsh/bash/auto()
 │   ├── init.sh                 # cmd_init() — full setup flow
@@ -150,8 +151,8 @@ kitsync init [--remote <url>]
 User: claude "write me a test"
          │
          ├── [background, disowned]
-         │     timeout 2s git pull --rebase --autostash -X ours
-         │     └── on success: kitsync _post-pull-hook → normalize_paths
+         │     timeout 2s git pull --rebase --autostash
+         │     └── on success: kitsync _post-pull-hook → decrypt, normalize_paths
          │
          └── [foreground, immediate]
                command claude "write me a test"
@@ -176,6 +177,7 @@ kitsync push [-m "message"]
 kitsync install https://github.com/user/claude-kit
   │
   ├── git clone --depth 1 <url> $(mktemp -d)
+  ├── hooks/ or scripts/ present? → warn + ask (skipped unless confirmed)
   ├── For each of: agents/ skills/ hooks/ rules/ scripts/ CLAUDE.md
   │     └── For each file in source:
   │           ├── Skip if in PROTECTED_FILES list
@@ -192,7 +194,7 @@ kitsync install https://github.com/user/claude-kit
 
 **Scenario:** `settings.json` committed with `/Users/alice/.claude/hooks/...` is pulled on a machine where home is `/home/bob`.
 
-**Resolution:** `normalize_paths()` runs after every pull. It matches the regex `/[A-Za-z0-9._/-]*/\.claude` and replaces all occurrences with `$HOME/.claude` for the current user.
+**Resolution:** the committed copy holds `__CLAUDE_HOME__` tokens, expanded to `/home/bob/.claude` by the smudge filter on checkout. Older commits with raw `/Users/alice/.claude` paths are rewritten by `normalize_paths()` after the pull.
 
 ### Dirty Working Tree on Auto-Pull
 
@@ -227,8 +229,9 @@ kitsync install https://github.com/user/claude-kit
 | Concern | Mitigation |
 |---|---|
 | `.credentials.json` leaked | Allowlist `.gitignore` + `sync_push()` safety check (exit 1) |
-| `settings.local.json` leaked | Listed in `.gitignore` + excluded from `normalize_paths()` processing |
-| Arbitrary code via kit install | Only copies files — no execution. User reviews changes with `kitsync status` |
+| `settings.local.json` leaked | Listed in `.gitignore`; `normalize_paths()` only touches `settings.json` |
+| Arbitrary code via kit install | `install` runs nothing, but `hooks/`/`scripts/` are executed by Claude Code later — copied only after explicit confirmation. A kit's `.kitsync/` is never copied |
+| Encryption key leaked | `.kitsync/encryption.key*` (incl. rotated backups) ignored; plaintext `settings.json` / `settings.template.json` untracked + ignored while encryption is on |
 | Path traversal in kit install | Kit files are only copied into `$CLAUDE_HOME/<known-dirs>/` — never outside |
 | Partial download of install.sh | Entire body wrapped in `install()` function, called only at last line |
 
