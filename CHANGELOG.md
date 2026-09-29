@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.4] — 2026-09-29
+
+### Fixed
+- **`upgrade` exited silently** (and never upgraded) when `KITSYNC_UPGRADE_CHANNEL` was not set in the config: a `grep` with no match aborted the script under `set -euo pipefail`. Same fix for the upgrade-channel settings menu and selective-sync config reads.
+- `install.sh` re-run now updates an existing install by aligning it on `origin/main`; `git pull --rebase` failed after the upstream history rewrite while still reporting "up to date".
+- `upgrade` no longer prints git's `HEAD is now at …` line.
+
+### Docs
+- Homebrew 6+ requires trusting third-party taps: `brew trust --formula charliinew/claude-kitsync/claude-kitsync`.
+
 ## [1.1.3] — 2026-09-29
 
 ### Fixed
