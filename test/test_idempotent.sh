@@ -163,40 +163,10 @@ run_test_ac11_three_installs_still_idempotent() {
     "AC11: wrapper markers still appear once after three installs"
 }
 
-run_test_ac11_install_sh_idempotent_if_exists() {
-  # If install.sh exists, run it twice and verify rc file not duplicated
-  if [[ ! -f "$_PROJECT_ROOT/install.sh" ]]; then
-    printf "  SKIP  AC11: install.sh not yet created — spec-driven test already covered above\n"
-    return 0
-  fi
-
-  setup_fake_claude_home
-  trap "teardown_fake_claude_home" RETURN
-
-  local fake_home="$_TEST_TMPDIR/home"
-  local rc_file="$fake_home/.zshrc"
-  mkdir -p "$fake_home"
-  touch "$rc_file"
-
-  # Run install.sh with HOME overridden to our fake directory
-  HOME="$fake_home" bash "$_PROJECT_ROOT/install.sh" --no-rc 2>/dev/null || \
-  HOME="$fake_home" bash "$_PROJECT_ROOT/install.sh" 2>/dev/null || true
-
-  HOME="$fake_home" bash "$_PROJECT_ROOT/install.sh" --no-rc 2>/dev/null || \
-  HOME="$fake_home" bash "$_PROJECT_ROOT/install.sh" 2>/dev/null || true
-
-  local marker_count
-  marker_count="$(grep -c "kitsync" "$rc_file" 2>/dev/null || true)"
-  marker_count="${marker_count:-0}"
-  marker_count="$(echo "$marker_count" | tr -d '[:space:]')"
-
-  # Verify block isn't duplicated. The wrapper now contains ~15 kitsync refs
-  # (pull/push/timer branches for zsh+bash). Cap at 30 — double that signals duplication.
-  local ok=0
-  [[ "$marker_count" -lt 30 ]] || ok=1
-  assert_zero "$ok" \
-    "AC11: install.sh double-run does not infinitely duplicate entries"
-}
+# The real install.sh re-run is covered offline by
+# run_test_reg_install_sh_rerun (test_regressions.sh). The former version of
+# this test ran the installer against the network with a fake HOME, and older
+# installers then wrote completion links into the real Homebrew prefix.
 
 run_test_ac11_wrapper_update_replaces_not_appends() {
   # If wrapper is updated (new content between markers), re-running install
@@ -232,6 +202,5 @@ run_idempotent_tests() {
   run_test_ac11_path_line_appears_exactly_once
   run_test_ac11_wrapper_markers_appear_exactly_once
   run_test_ac11_three_installs_still_idempotent
-  run_test_ac11_install_sh_idempotent_if_exists
   run_test_ac11_wrapper_update_replaces_not_appends
 }

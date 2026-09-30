@@ -231,6 +231,48 @@ run_test_reg_upgrade_never_downgrades() {
   done
 }
 
+run_test_reg_install_sh_rerun() {
+  # Offline re-run of install.sh over an existing kitsync setup: no prompt,
+  # no duplicated rc lines, completion loaded from the install dir.
+  local root home rc
+  root="$(mktemp -d)"
+  trap "rm -rf '$root'" RETURN
+  home="$root/home"
+  rc="$home/.zshrc"
+  mkdir -p "$home/.claude/.kitsync"
+  echo "KITSYNC_PULL_MODE=auto" > "$home/.claude/.kitsync/config"
+  git -C "$home/.claude" init -q
+
+  local i
+  for i in 1 2; do
+    HOME="$home" SHELL=/bin/zsh ZDOTDIR="" CLAUDE_HOME="$home/.claude" \
+      KITSYNC_INSTALL_DIR="$_PROJECT_ROOT" bash "$_PROJECT_ROOT/install.sh" \
+      </dev/null >/dev/null 2>&1
+  done
+
+  assert_eq "1" "$(grep -c '^# claude-kitsync PATH$' "$rc")" \
+    "REG: install.sh re-run adds the PATH line once"
+  assert_eq "1" "$(grep -c '^# claude-kitsync completion$' "$rc")" \
+    "REG: install.sh re-run adds the completion block once"
+  assert_contains "$(cat "$rc")" "fpath=(\"$_PROJECT_ROOT/completions\"" \
+    "REG: zsh completion loaded from the install dir"
+  assert_file_exists "$home/.local/bin/claude-kitsync" \
+    "REG: binary linked into ~/.local/bin"
+
+  # uninstall's rc cleanup removes the whole completion block
+  # fresh process: the runner shell already sourced these libs (readonly vars)
+  _REG_LIBS="$_PROJECT_ROOT/lib" bash -c '
+    source "$_REG_LIBS/core.sh"
+    source "$_REG_LIBS/wrapper.sh"
+    set +e
+    _remove_completion_from_rc "$1"
+  ' _ "$rc" >/dev/null 2>&1
+  assert_eq "0" "$(grep -c 'claude-kitsync completion\|compdef _claude-kitsync' "$rc")" \
+    "REG: uninstall removes the completion block"
+  assert_eq "1" "$(grep -c '^# claude-kitsync PATH$' "$rc")" \
+    "REG: completion cleanup leaves the PATH line alone"
+}
+
 run_regressions_tests() {
   printf "\n=== test_regressions.sh (sync / encryption regressions) ===\n"
   export GIT_AUTHOR_NAME=kitsync-test GIT_AUTHOR_EMAIL=t@kitsync.local
@@ -243,4 +285,5 @@ run_regressions_tests() {
   run_test_reg_gitignore_migration
   run_test_reg_normalize_scope
   run_test_reg_upgrade_never_downgrades
+  run_test_reg_install_sh_rerun
 }
