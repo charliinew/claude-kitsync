@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.5] — 2026-09-30
+
+### Changed
+- **`skills/synced/` is no longer synced.** It holds the skills of your claude.ai account, which Claude Code re-downloads (and updates) on every startup; its `.last-complete-round` marker produced a commit on almost every session. Existing repos stop tracking it on the next push/pull; the files stay on disk.
+
 ## [1.1.4] — 2026-09-29
 
 ### Fixed
