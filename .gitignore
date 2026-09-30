@@ -1,5 +1,5 @@
 # Local Claude Code workspace (APEX outputs, settings.local.json, …)
-.claude/
+/.claude/
 
 # OS / editor
 .DS_Store
