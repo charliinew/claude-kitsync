@@ -216,6 +216,19 @@ run_test_reg_normalize_scope() {
     "REG: normalize_paths leaves runtime json untouched"
 }
 
+run_test_reg_upgrade_never_downgrades() {
+  # Load only _version_lt from the CLI (sourcing bin/ would run main)
+  eval "$(awk '/^_version_lt\(\) \{/,/^\}/' "$_PROJECT_ROOT/bin/claude-kitsync")"
+
+  local pair a b expected got
+  for pair in "1.1.4:1.1.5:lt" "1.1.5:1.1.4:ge" "1.1.5:1.1.5:ge" \
+              "1.1.9:1.1.10:lt" "1.10.0:1.9.0:ge" "0.0.0:1.1.5:lt" "1.2.0-rc1:1.2.0:ge"; do
+    IFS=: read -r a b expected <<< "$pair"
+    if _version_lt "$a" "$b"; then got=lt; else got=ge; fi
+    assert_eq "$expected" "$got" "REG: version $a vs $b → $expected (upgrade never downgrades)"
+  done
+}
+
 run_regressions_tests() {
   printf "\n=== test_regressions.sh (sync / encryption regressions) ===\n"
   export GIT_AUTHOR_NAME=kitsync-test GIT_AUTHOR_EMAIL=t@kitsync.local
@@ -227,4 +240,5 @@ run_regressions_tests() {
   run_test_reg_encrypted_pull_other_machine
   run_test_reg_gitignore_migration
   run_test_reg_normalize_scope
+  run_test_reg_upgrade_never_downgrades
 }

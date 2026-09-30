@@ -245,6 +245,23 @@ cmd_uninstall() {
 # cmd_upgrade — update claude-kitsync to the latest stable release, or latest commit (dev mode)
 # Usage: claude-kitsync upgrade [--dev]
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# _version_lt <a> <b> — true if version a is strictly lower than b
+# (numeric major.minor.patch; non-digit suffixes are ignored)
+# ---------------------------------------------------------------------------
+_version_lt() {
+  local IFS=.
+  local -a _a=($1) _b=($2)
+  local i x y
+  for i in 0 1 2; do
+    x="${_a[i]:-0}"; x="${x//[^0-9]/}"; x="${x:-0}"
+    y="${_b[i]:-0}"; y="${y//[^0-9]/}"; y="${y:-0}"
+    (( 10#$x < 10#$y )) && return 0
+    (( 10#$x > 10#$y )) && return 1
+  done
+  return 1
+}
+
 cmd_upgrade() {
   local _dev_mode=false
 
@@ -321,7 +338,9 @@ cmd_upgrade() {
   current_version="$(cat "$KITSYNC_ROOT/VERSION" 2>/dev/null || echo "0.0.0")"
   local latest_version="${latest_tag#v}"
 
-  if [[ "$current_version" == "$latest_version" ]]; then
+  # Never downgrade: the API's "latest" lags behind a freshly pushed tag
+  # until its release workflow has finished
+  if ! _version_lt "$current_version" "$latest_version"; then
     log_success "Already up to date  (v$current_version)"
     return 0
   fi
