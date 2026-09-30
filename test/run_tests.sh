@@ -21,6 +21,9 @@ if [[ -z "${CLAUDE_HOME:-}" ]]; then
   # Not yet set — leave it unset; each test module sets its own via helpers.sh
   : # no-op
 fi
+# Tests fake $HOME, but rc-file lookups use ${ZDOTDIR:-$HOME}: an inherited
+# ZDOTDIR would point them at the developer's real ~/.zshrc
+unset ZDOTDIR
 
 # ---------------------------------------------------------------------------
 # Source helpers (counters must be global for the runner to see final totals)
