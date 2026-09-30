@@ -20,6 +20,8 @@ _reg_setup() {
   _REG_REMOTE="$_REG_ROOT/remote.git"
   mkdir -p "$_REG_HOME/.claude"
   git init -q --bare "$_REG_REMOTE"
+  # Clones must check out main regardless of the runner's init.defaultBranch
+  git -C "$_REG_REMOTE" symbolic-ref HEAD refs/heads/main
   _reg_init_clone "$_REG_HOME"
   (
     cd "$_REG_HOME/.claude" || exit 1
@@ -45,20 +47,20 @@ _reg_teardown() {
   [[ -n "${_REG_ROOT:-}" ]] && rm -rf "$_REG_ROOT"
 }
 
-# _reg_run <home> <cmd...> — run kitsync lib functions as the user of <home>
+# _reg_run <home> <cmd...> — run kitsync lib functions as the user of <home>.
+# Uses a fresh bash process: earlier test modules source the same libs into the
+# runner shell, and re-declaring their readonly arrays in a mere subshell aborts
+# the source under bash 5 (set -e).
 _reg_run() {
   local h="$1"; shift
-  (
-    export HOME="$h" CLAUDE_HOME="$h/.claude"
-    set +e
-    source "$_PROJECT_ROOT/lib/core.sh"
-    source "$_PROJECT_ROOT/lib/paths.sh"
-    source "$_PROJECT_ROOT/lib/profiles.sh"
-    source "$_PROJECT_ROOT/lib/crypto.sh"
-    source "$_PROJECT_ROOT/lib/sync.sh"
-    set +e
-    "$@"
-  ) 2>/dev/null
+  HOME="$h" CLAUDE_HOME="$h/.claude" _REG_LIBS="$_PROJECT_ROOT/lib" \
+    bash -c '
+      for _lib in core paths profiles crypto sync; do
+        source "$_REG_LIBS/$_lib.sh"
+      done
+      set +e
+      "$@"
+    ' _reg_run "$@" 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
