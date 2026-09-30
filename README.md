@@ -19,14 +19,24 @@ The installer will:
 
 Then run the one activation command it prints (e.g. `source ~/.zshrc`) and you're done.
 
-**If you already know your remote URL:**
+**If you already know your remote URL** — the variable goes on the `bash` side of the pipe:
 
 ```bash
-KITSYNC_REMOTE=git@github.com:you/claude-config.git \
-  curl -fsSL https://raw.githubusercontent.com/charliinew/claude-kitsync/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/charliinew/claude-kitsync/main/install.sh \
+  | KITSYNC_REMOTE=git@github.com:you/claude-config.git bash
 ```
 
-No prompts — fully automated setup.
+This skips the storage question; `init` still asks for a profile name and your sync preferences.
+
+The installer installs the latest release. Pin a version with `KITSYNC_VERSION=v1.1.6`, or follow development with `KITSYNC_VERSION=main`.
+
+**Verified install** — check the installer against the release checksums before running it:
+
+```bash
+curl -fsSLO https://github.com/charliinew/claude-kitsync/releases/latest/download/install.sh
+curl -fsSLO https://github.com/charliinew/claude-kitsync/releases/latest/download/SHA256SUMS
+shasum -a 256 -c --ignore-missing SHA256SUMS && bash install.sh
+```
 
 **Via Homebrew:**
 

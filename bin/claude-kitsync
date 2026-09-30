@@ -213,9 +213,13 @@ cmd_uninstall() {
   # Step 1: Remove shell wrapper block from rc files
   remove_wrapper
 
-  # Step 2: Remove PATH entry from rc files
-  _remove_path_from_rc "${ZDOTDIR:-$HOME}/.zshrc"
-  _remove_path_from_rc "$HOME/.bashrc"
+  # Step 2: Remove PATH entry and completion block from rc files
+  # (install.sh writes to ~/.bash_profile for bash on macOS)
+  local _rc
+  for _rc in "${ZDOTDIR:-$HOME}/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
+    _remove_path_from_rc "$_rc"
+    _remove_completion_from_rc "$_rc"
+  done
 
   # Step 3: Remove binary symlink (find it via PATH lookup)
   local bin_symlink
@@ -292,7 +296,10 @@ cmd_upgrade() {
     log_step "Upgrading to latest commit (dev channel)..."
     local before_sha after_sha
     before_sha="$(git -C "$KITSYNC_ROOT" rev-parse --short HEAD 2>/dev/null || echo '?')"
-    if git -C "$KITSYNC_ROOT" pull --rebase -q 2>/dev/null; then
+    # Installs are shallow clones that may sit on a release tag (detached
+    # HEAD), so move to origin/main explicitly instead of pulling
+    if git -C "$KITSYNC_ROOT" fetch -q --depth 1 origin main 2>/dev/null && \
+       git -C "$KITSYNC_ROOT" reset -q --hard FETCH_HEAD 2>/dev/null; then
       after_sha="$(git -C "$KITSYNC_ROOT" rev-parse --short HEAD 2>/dev/null || echo '?')"
       if [[ "$before_sha" == "$after_sha" ]]; then
         log_success "Already up to date  ($after_sha)"

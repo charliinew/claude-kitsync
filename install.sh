@@ -3,8 +3,12 @@
 #
 # One command = fully configured:
 #   curl -fsSL .../install.sh | bash
-#   # or with a known remote:
-#   KITSYNC_REMOTE=git@github.com:you/claude-config.git curl -fsSL .../install.sh | bash
+#   # or with a known remote (variables go on the bash side of the pipe):
+#   curl -fsSL .../install.sh | KITSYNC_REMOTE=git@github.com:you/claude-config.git bash
+#
+# Environment:
+#   KITSYNC_REMOTE   git URL of your config repo (skips the storage question)
+#   KITSYNC_VERSION  tag to install (e.g. v1.1.6) or "main"; default: latest release
 #
 # Protection against partial download: entire body is wrapped in install()
 # and called at the very end. If the download is truncated, the function
@@ -85,9 +89,9 @@ _select_tty() {
   local n=${#options[@]}
   local selected=0
 
-  # Hide cursor; restore on interrupt
+  # Hide cursor; on Ctrl+C restore it and abort (never return the highlighted option)
   printf '\033[?25l' >/dev/tty
-  trap 'printf "\033[?25h" >/dev/tty' INT TERM
+  trap 'printf "\033[?25h\n" >/dev/tty; exit 130' INT TERM
 
   # Print header + initial menu
   printf "\n" >/dev/tty
@@ -153,12 +157,24 @@ _select_tty() {
   printf '%s' "$(( selected + 1 ))"
 }
 
-# Create a new GitHub repo via gh CLI, return SSH URL
+# _gh_clone_url <owner/repo> — URL matching the git protocol configured in gh
+# (SSH only if the user chose it; HTTPS pushes go through gh's credential helper)
+_gh_clone_url() {
+  local proto
+  proto="$(gh config get git_protocol -h github.com 2>/dev/null || true)"
+  if [[ "$proto" == "ssh" ]]; then
+    printf 'git@github.com:%s.git' "$1"
+  else
+    printf 'https://github.com/%s.git' "$1"
+  fi
+}
+
+# Create a new GitHub repo via gh CLI, return its clone URL
 _gh_create_repo_tty() {
   local repo_name
   repo_name="$(_read_tty "Repo name" "claude-config")"
   local vis_choice
-  vis_choice="$(_select_tty "Visibility?" "Private  (recommended)" "Public")"
+  vis_choice="$(_select_tty "Visibility?" "Private  (recommended)" "Public")" || _die "Installation aborted."
   local vis_flag="--private"
   [[ "$vis_choice" == "2" ]] && vis_flag="--public"
 
@@ -166,7 +182,8 @@ _gh_create_repo_tty() {
   if gh repo create "$repo_name" "$vis_flag" --description "Claude Code config sync" >/dev/null 2>&1; then
     local gh_login
     gh_login="$(gh api user -q .login 2>/dev/null)"
-    local result_url="git@github.com:${gh_login}/${repo_name}.git"
+    local result_url
+    result_url="$(_gh_clone_url "${gh_login}/${repo_name}")"
     _ok "Repo created: github.com/${gh_login}/${repo_name}"
     printf '%s' "$result_url"
   else
@@ -175,7 +192,7 @@ _gh_create_repo_tty() {
   fi
 }
 
-# Browse existing GitHub repos via gh CLI, return selected SSH URL
+# Browse existing GitHub repos via gh CLI, return the selected clone URL
 _gh_connect_repo_tty() {
   _step "Fetching your GitHub repos..."
 
@@ -194,10 +211,10 @@ _gh_connect_repo_tty() {
   done <<< "$repo_lines"
 
   local choice
-  choice="$(_select_tty "Select a repository:" "${options[@]}")"
+  choice="$(_select_tty "Select a repository:" "${options[@]}")" || _die "Installation aborted."
 
   local selected="${options[$((choice - 1))]}"
-  printf 'git@github.com:%s.git' "$selected"
+  _gh_clone_url "$selected"
 }
 
 # GitHub sub-menu: create new or connect existing
@@ -205,7 +222,7 @@ _gh_repo_flow_tty() {
   local action
   action="$(_select_tty "GitHub repository:" \
     "Create a new repo" \
-    "Connect to an existing repo")"
+    "Connect to an existing repo")" || _die "Installation aborted."
 
   case "$action" in
     1) _gh_create_repo_tty ;;
@@ -225,7 +242,7 @@ _select_remote_tty() {
   options+=("Skip — configure later")
 
   local choice
-  choice="$(_select_tty "Where should your Claude config be stored?" "${options[@]}")"
+  choice="$(_select_tty "Where should your Claude config be stored?" "${options[@]}")" || _die "Installation aborted."
 
   local actions=()
   [[ "$has_gh" == "true" ]] && actions+=("github")
@@ -235,7 +252,7 @@ _select_remote_tty() {
 
   case "$action" in
     github)
-      _gh_repo_flow_tty
+      _gh_repo_flow_tty || exit 1
       ;;
     url_input)
       printf '%s' "$(_read_tty "Git URL (SSH or HTTPS, blank to skip)" "")"
@@ -244,6 +261,25 @@ _select_remote_tty() {
       printf ''
       ;;
   esac
+}
+
+# _resolve_ref — what to install: $KITSYNC_VERSION, else the latest release
+# (same channel as `claude-kitsync upgrade`), else the highest tag, else main
+_resolve_ref() {
+  if [[ -n "${KITSYNC_VERSION:-}" ]]; then
+    printf '%s' "$KITSYNC_VERSION"
+    return 0
+  fi
+  local tag=""
+  if command -v curl &>/dev/null; then
+    tag="$(curl -fsSL "https://api.github.com/repos/charliinew/claude-kitsync/releases/latest" 2>/dev/null \
+      | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1 || true)"
+  fi
+  if [[ -z "$tag" ]]; then
+    tag="$(git ls-remote --tags --sort=-v:refname "$KITSYNC_REPO" 'refs/tags/v*' 2>/dev/null \
+      | grep -v '\^{}' | head -1 | sed 's|.*refs/tags/||' || true)"
+  fi
+  printf '%s' "${tag:-main}"
 }
 
 # ---------------------------------------------------------------------------
@@ -278,22 +314,30 @@ if [[ -n "${KITSYNC_INSTALL_DIR:-}" ]]; then
   # Dev/test override: use an existing local directory, skip clone
   install_dir="$KITSYNC_INSTALL_DIR"
   _log "Using local install dir: $install_dir"
-elif [[ -d "$install_dir/.git" ]]; then
-  _step "Updating kitsync..."
-  # The install dir is a managed clone: align it on origin/main (a pull --rebase
-  # fails if upstream history was ever rewritten)
-  if git -C "$install_dir" fetch -q origin main 2>/dev/null && \
-     git -C "$install_dir" reset -q --hard origin/main 2>/dev/null; then
-    _ok "kitsync up to date"
-  else
-    _warn "Update failed, keeping current version."
-  fi
 else
-  _step "Installing kitsync..."
-  [[ -d "$install_dir" ]] && rm -rf "$install_dir"
-  git clone --depth 1 -q "$KITSYNC_REPO" "$install_dir" 2>/dev/null || \
-    _die "Clone failed — check your network connection."
-  _ok "kitsync installed"
+  local ref git_out
+  ref="$(_resolve_ref)"
+  if [[ -d "$install_dir/.git" ]]; then
+    _step "Updating kitsync to $ref..."
+    # Managed clone: move it to the requested ref (a pull --rebase would fail
+    # if upstream history was ever rewritten)
+    if git_out="$(git -C "$install_dir" fetch -q --depth 1 origin "$ref" 2>&1 && \
+                  git -C "$install_dir" reset -q --hard FETCH_HEAD 2>&1)"; then
+      _ok "kitsync $ref ready"
+    else
+      _warn "Update failed, keeping current version:"
+      printf '%s\n' "$git_out" | sed 's/^/      /' >&2
+    fi
+  else
+    _step "Installing kitsync $ref..."
+    [[ -d "$install_dir" ]] && rm -rf "$install_dir"
+    if ! git_out="$(git -c advice.detachedHead=false clone -q --depth 1 \
+                    --branch "$ref" "$KITSYNC_REPO" "$install_dir" 2>&1)"; then
+      printf '%s\n' "$git_out" | sed 's/^/      /' >&2
+      _die "Clone failed (see git output above)."
+    fi
+    _ok "kitsync $ref installed"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -312,33 +356,6 @@ else
   ln -sf "$kitsync_bin" "$kitsync_dest"
 fi
 _ok "Binary ready at $kitsync_dest"
-
-# ---------------------------------------------------------------------------
-# Step 3b: Install shell completions (non-fatal if it fails)
-# ---------------------------------------------------------------------------
-local comp_dir="$install_dir/completions"
-if [[ -d "$comp_dir" ]]; then
-  local zsh_comp_dest=""
-  if command -v brew &>/dev/null 2>&1; then
-    zsh_comp_dest="$(brew --prefix 2>/dev/null)/share/zsh/site-functions/_claude-kitsync"
-  else
-    zsh_comp_dest="${ZDOTDIR:-$HOME}/.zsh/completions/_claude-kitsync"
-    mkdir -p "$(dirname "$zsh_comp_dest")" 2>/dev/null || true
-  fi
-  if [[ -n "$zsh_comp_dest" ]] && [[ -f "$comp_dir/_claude-kitsync" ]]; then
-    ln -sf "$comp_dir/_claude-kitsync" "$zsh_comp_dest" 2>/dev/null && \
-      _ok "Zsh completion installed" || _warn "Could not install zsh completion (non-fatal)"
-  fi
-
-  if command -v brew &>/dev/null 2>&1; then
-    local bash_comp_dest
-    bash_comp_dest="$(brew --prefix 2>/dev/null)/etc/bash_completion.d/claude-kitsync"
-    if [[ -f "$comp_dir/claude-kitsync.bash" ]]; then
-      ln -sf "$comp_dir/claude-kitsync.bash" "$bash_comp_dest" 2>/dev/null && \
-        _ok "Bash completion installed" || _warn "Could not install bash completion (non-fatal)"
-    fi
-  fi
-fi
 
 # ---------------------------------------------------------------------------
 # Step 4: Inject PATH into shell rc (idempotent)
@@ -360,6 +377,50 @@ if [[ -n "$rc_file" ]]; then
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# Step 4b: Shell completions — loaded from the install dir by the rc file
+# (a directory zsh really searches; nothing written into Homebrew's prefix)
+# ---------------------------------------------------------------------------
+local comp_dir="$install_dir/completions"
+
+# Drop links left by older installers (brew prefix / ~/.zsh/completions)
+local _brew_prefix _old_link
+_brew_prefix="$(brew --prefix 2>/dev/null || true)"
+for _old_link in \
+    "$_brew_prefix/share/zsh/site-functions/_claude-kitsync" \
+    "$_brew_prefix/etc/bash_completion.d/claude-kitsync" \
+    "${ZDOTDIR:-$HOME}/.zsh/completions/_claude-kitsync"; do
+  # Any link into a script-installed kitsync (incl. dangling ones from a moved
+  # or deleted install); Homebrew's own links point into its Cellar instead
+  if [[ -L "$_old_link" ]] && [[ "$(readlink "$_old_link")" == */kitsync/completions/* ]]; then
+    rm -f "$_old_link"
+  fi
+done
+
+if [[ -n "$rc_file" ]] && [[ -d "$comp_dir" ]] && \
+   ! grep -qF "# claude-kitsync completion" "$rc_file" 2>/dev/null; then
+  case "$current_shell" in
+    zsh)
+      {
+        printf '\n# claude-kitsync completion\n'
+        printf 'fpath=("%s" $fpath)\n' "$comp_dir"
+        # shellcheck disable=SC2016
+        printf '(( $+functions[compdef] )) && { autoload -Uz _claude-kitsync && compdef _claude-kitsync claude-kitsync; }\n'
+        printf '# claude-kitsync completion end\n'
+      } >> "$rc_file"
+      _ok "Zsh completion enabled"
+      ;;
+    bash)
+      {
+        printf '\n# claude-kitsync completion\n'
+        printf '[ -f "%s/claude-kitsync.bash" ] && . "%s/claude-kitsync.bash"\n' "$comp_dir" "$comp_dir"
+        printf '# claude-kitsync completion end\n'
+      } >> "$rc_file"
+      _ok "Bash completion enabled"
+      ;;
+  esac
+fi
+
 # Make binary available in the current process immediately
 export PATH="$bin_dir:$PATH"
 export KITSYNC_ROOT="$install_dir"
@@ -372,19 +433,23 @@ _step "Setting up ~/.claude sync..."
 printf "\n" >&2
 
 local claude_home="${CLAUDE_HOME:-$HOME/.claude}"
-local already_init=false
-git -C "$claude_home" rev-parse --git-dir &>/dev/null 2>&1 && already_init=true
 
-if [[ "$already_init" == true ]]; then
-  _ok "~/.claude is already a git repo — skipping git init."
+if [[ -f "$claude_home/.kitsync/config" ]]; then
+  _ok "$claude_home is already set up by kitsync — keeping your configuration."
   # Still ensure wrapper is installed
   "$kitsync_dest" _install-wrapper 2>/dev/null || true
 else
-  # Get the remote URL
+  if git -C "$claude_home" rev-parse --git-dir &>/dev/null; then
+    _warn "$claude_home is a git repo not set up by kitsync — running init on it."
+  fi
+
+  # Get the remote URL (not asked when the existing repo already has one)
   local remote_url="${KITSYNC_REMOTE:-}"
 
-  if [[ -z "$remote_url" ]]; then
-    remote_url="$(_select_remote_tty)"
+  if [[ -z "$remote_url" ]] && git -C "$claude_home" remote get-url origin &>/dev/null; then
+    _log "Keeping existing remote: $(git -C "$claude_home" remote get-url origin)"
+  elif [[ -z "$remote_url" ]]; then
+    remote_url="$(_select_remote_tty)" || exit 1
   else
     _log "Using remote: $remote_url"
   fi

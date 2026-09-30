@@ -411,6 +411,23 @@ remove_wrapper() {
 }
 
 # ---------------------------------------------------------------------------
+# _remove_completion_from_rc — remove the completion block added by install.sh
+# ---------------------------------------------------------------------------
+_remove_completion_from_rc() {
+  local rc_file="$1"
+  [[ -f "$rc_file" ]] || return 0
+  grep -qF "# claude-kitsync completion" "$rc_file" 2>/dev/null || return 0
+
+  local tmp_file
+  tmp_file="$(mktemp)"
+  awk '/^# claude-kitsync completion$/{skip=1; next}
+       /^# claude-kitsync completion end$/{skip=0; next}
+       !skip' "$rc_file" > "$tmp_file"
+  mv "$tmp_file" "$rc_file"
+  log_info "Removed completion setup from $rc_file"
+}
+
+# ---------------------------------------------------------------------------
 # _remove_path_from_rc — remove the PATH injection line added by install.sh
 # Handles both old marker (# kitsync PATH) and new (# claude-kitsync PATH)
 # ---------------------------------------------------------------------------
