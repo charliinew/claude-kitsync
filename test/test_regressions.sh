@@ -177,9 +177,11 @@ run_test_reg_gitignore_migration() {
 
   # Simulate a pre-1.1.3 allowlist and a tracked rotated key backup
   grep -v -e 'encryption.key' -e 'pending-notice' -e 'conflict_pending' \
-    -e 'commands' "$ch/.gitignore" > "$ch/.gitignore.old"
+    -e 'commands' -e 'skills/synced' "$ch/.gitignore" > "$ch/.gitignore.old"
   mv "$ch/.gitignore.old" "$ch/.gitignore"
-  mkdir -p "$ch/.kitsync" "$ch/commands"
+  mkdir -p "$ch/.kitsync" "$ch/commands" "$ch/skills/synced/acct" "$ch/skills/mine"
+  echo "# mine" > "$ch/skills/mine/SKILL.md"
+  echo "# managed" > "$ch/skills/synced/acct/SKILL.md"
   echo old > "$ch/.kitsync/encryption.key.bak.1"
   echo notice > "$ch/.kitsync/pending-notice"
   git -C "$ch" add -A && git -C "$ch" commit -qm legacy
@@ -193,6 +195,12 @@ run_test_reg_gitignore_migration() {
     "REG: machine-local .kitsync files untracked by migration"
   assert_eq "1" "$(printf '%s\n' "$tree" | grep -cx 'commands/hello.md')" \
     "REG: commands/ synced after migration"
+  assert_eq "0" "$(printf '%s\n' "$tree" | grep -c '^skills/synced/')" \
+    "REG: skills/synced/ (claude.ai account skills) untracked by migration"
+  assert_eq "1" "$(printf '%s\n' "$tree" | grep -cx 'skills/mine/SKILL.md')" \
+    "REG: user skills still synced"
+  assert_file_exists "$ch/skills/synced/acct/SKILL.md" \
+    "REG: skills/synced/ kept on disk (only untracked)"
 }
 
 run_test_reg_normalize_scope() {

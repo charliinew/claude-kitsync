@@ -44,6 +44,8 @@
 
 # JAMAIS syncé (explicite) — these override the !*/ rule above
 .credentials.json
+# skills from your claude.ai account — Claude Code downloads them on startup
+skills/synced/
 projects/
 backups/
 cache/

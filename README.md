@@ -81,6 +81,8 @@ claude() {
 - `settings.json`, `CLAUDE.md`, `keybindings.json`
 - `agents/`, `skills/`, `hooks/`, `scripts/`, `rules/`, `commands/`, `output-styles/`, `workflows/`, `themes/`
 
+`skills/synced/` is excluded: it holds the skills of your claude.ai account, which Claude Code downloads by itself on startup.
+
 Pick a subset per direction with **selective sync** (`claude-kitsync settings` → Sync categories): for example push `skills/` from every machine but never pull `settings.json` on a work laptop.
 
 **Portable paths** — `settings.json` often contains paths like `/Users/alice/.claude/hooks/...`. A git clean/smudge filter stores them in the repo as `__CLAUDE_HOME__/hooks/...` (and `$HOME` as `__HOME__`) and expands them back to the current machine's paths on checkout. Your working copy always keeps real absolute paths; only the committed version is tokenized.

@@ -63,6 +63,7 @@ _gitignore_migrate() {
     ".kitsync/pending-notice"
     ".kitsync/conflict_pending"
     ".kitsync/*.tmp.*"
+    "skills/synced/"
   )
   local missing=() r
   for r in "${rules[@]}"; do
@@ -76,6 +77,12 @@ _gitignore_migrate() {
   local tracked
   tracked="$(git -C "$CLAUDE_HOME" ls-files -- '.kitsync/encryption.key*' \
     .kitsync/pending-notice .kitsync/conflict_pending 2>/dev/null || true)"
+
+  # Account skills managed by Claude Code (re-downloaded on every startup)
+  if [[ -n "$(git -C "$CLAUDE_HOME" ls-files -- skills/synced 2>/dev/null | head -1)" ]]; then
+    git -C "$CLAUDE_HOME" rm -r --cached -q -- skills/synced 2>/dev/null || true
+    log_info "Stopped syncing skills/synced/ (claude.ai account skills, managed by Claude Code)."
+  fi
   if [[ -n "$tracked" ]]; then
     printf '%s\n' "$tracked" | while IFS= read -r _f; do
       git -C "$CLAUDE_HOME" rm --cached -q -- "$_f" 2>/dev/null || true
