@@ -96,7 +96,7 @@ cmd_doctor() {
   local warnings=0
 
   printf "\n"
-  log_info "Running claude-kitsync doctor...\n"
+  log_info "Running claude-kitsync doctor..."; printf "\n" >&2
 
   # Check 1: CLAUDE_HOME exists
   if [[ -d "$CLAUDE_HOME" ]]; then
@@ -200,6 +200,14 @@ cmd_doctor() {
 }
 
 # ---------------------------------------------------------------------------
+# _installed_via_brew — true when running from a Homebrew keg
+# (KITSYNC_ROOT resolves to …/Cellar/claude-kitsync/<version>/libexec)
+# ---------------------------------------------------------------------------
+_installed_via_brew() {
+  [[ "$KITSYNC_ROOT" == */Cellar/claude-kitsync/* ]]
+}
+
+# ---------------------------------------------------------------------------
 # cmd_uninstall — full removal of claude-kitsync
 #   1. Remove shell wrapper (claude() function) from rc files
 #   2. Remove PATH injection from rc files
@@ -208,10 +216,19 @@ cmd_doctor() {
 # ---------------------------------------------------------------------------
 cmd_uninstall() {
   printf "\n"
-  log_info "Uninstalling claude-kitsync...\n"
+  log_info "Uninstalling claude-kitsync..."; printf "\n" >&2
 
   # Step 1: Remove shell wrapper block from rc files
   remove_wrapper
+
+  # Homebrew owns the binary and the install dir (inside its Cellar):
+  # deleting them here would leave a corrupted formula behind
+  if _installed_via_brew; then
+    printf "\n"
+    log_info "Finish with: brew uninstall claude-kitsync"
+    printf "\n"
+    return 0
+  fi
 
   # Step 2: Remove PATH entry and completion block from rc files
   # (install.sh writes to ~/.bash_profile for bash on macOS)
@@ -275,6 +292,11 @@ cmd_upgrade() {
       *) die "Unknown option: $1 (usage: claude-kitsync upgrade [--dev])" ;;
     esac
   done
+
+  if _installed_via_brew; then
+    log_info "claude-kitsync is managed by Homebrew — run: brew upgrade claude-kitsync"
+    return 0
+  fi
 
   if [[ ! -d "$KITSYNC_ROOT/.git" ]]; then
     log_warn "KITSYNC_ROOT is not a git repo — can't auto-upgrade."

@@ -231,6 +231,24 @@ run_test_reg_upgrade_never_downgrades() {
   done
 }
 
+run_test_reg_brew_install_detection() {
+  # upgrade/uninstall must hand over to brew instead of touching its Cellar
+  eval "$(awk '/^_installed_via_brew\(\) \{/,/^\}/' "$_PROJECT_ROOT/bin/claude-kitsync")"
+
+  local root expected got
+  for root in \
+      "/opt/homebrew/Cellar/claude-kitsync/1.1.8/libexec:brew" \
+      "/home/linuxbrew/.linuxbrew/Cellar/claude-kitsync/1.1.8/libexec:brew" \
+      "$HOME/.local/share/kitsync:script" \
+      "/opt/homebrew/Cellar/other-tool/1.0/libexec:script"; do
+    expected="${root##*:}"
+    KITSYNC_ROOT="${root%:*}"
+    if _installed_via_brew; then got=brew; else got=script; fi
+    assert_eq "$expected" "$got" "REG: ${root%:*} detected as $expected install"
+  done
+  unset KITSYNC_ROOT
+}
+
 run_test_reg_install_sh_rerun() {
   # Offline re-run of install.sh over an existing kitsync setup: no prompt,
   # no duplicated rc lines, completion loaded from the install dir.
@@ -286,4 +304,5 @@ run_regressions_tests() {
   run_test_reg_normalize_scope
   run_test_reg_upgrade_never_downgrades
   run_test_reg_install_sh_rerun
+  run_test_reg_brew_install_detection
 }
