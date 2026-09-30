@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.8] — 2026-09-30
+
+### Fixed
+- **Homebrew formula never installed** (since v1.0.0): `libexec.install` moved `completions/` before the completion files were installed (`Errno::ENOENT: completions/_claude-kitsync`). Completions are now installed first; verified with `brew install`, `brew test` and `brew style`.
+- **`uninstall` on a Homebrew install deleted files inside Homebrew's Cellar**, leaving a corrupted formula. It now removes the shell wrapper and tells you to run `brew uninstall claude-kitsync`.
+- **`upgrade` on a Homebrew install** suggested re-running the curl installer (creating a second install); it now points to `brew upgrade claude-kitsync`.
+- Several messages printed a literal `\n`.
+
+### Changed
+- Formula gains a `livecheck` block (latest GitHub release).
+
 ## [1.1.7] — 2026-09-30
 
 ### Fixed
