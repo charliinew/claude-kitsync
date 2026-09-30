@@ -6,11 +6,18 @@ class ClaudeKitsync < Formula
   license "MIT"
   head "https://github.com/charliinew/claude-kitsync.git", branch: "main"
 
+  livecheck do
+    url :stable
+    strategy :github_latest
+  end
+
   def install
-    libexec.install "bin", "lib", "kit", "templates", "completions", "VERSION"
-    bin.install_symlink libexec/"bin/claude-kitsync"
+    # Completions first: Pathname#install moves files, so they must leave the
+    # build dir before the rest of the tree is moved into libexec
     zsh_completion.install "completions/_claude-kitsync"
     bash_completion.install "completions/claude-kitsync.bash"
+    libexec.install "bin", "lib", "kit", "templates", "VERSION"
+    bin.install_symlink libexec/"bin/claude-kitsync"
   end
 
   test do
