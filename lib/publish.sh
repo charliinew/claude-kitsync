@@ -57,7 +57,7 @@ _publish_readme() {
 # ---------------------------------------------------------------------------
 cmd_publish() {
   printf "\n"
-  log_info "Publish a kit from $CLAUDE_HOME\n"
+  log_info "Publish a kit from $CLAUDE_HOME"; printf "\n" >&2
 
   # Step 1: discover non-empty publishable items
   local _avail=()

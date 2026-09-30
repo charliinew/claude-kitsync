@@ -362,7 +362,7 @@ sync_push() {
 
   # Dry-run: stage → preview → reset → exit
   if [[ "$_dry_run" == true ]]; then
-    log_step "Dry run — showing what would be committed\n"
+    log_step "Dry run — showing what would be committed"; printf "\n" >&2
     local _dry_push_items
     _dry_push_items="$(_sync_get_push_items)"
     for item in "${SYNC_WHITELIST[@]}"; do
@@ -505,7 +505,7 @@ sync_log() {
   [[ "$count" =~ ^[0-9]+$ ]] || count=15
 
   printf "\n"
-  log_info "Sync history — $CLAUDE_HOME\n"
+  log_info "Sync history — $CLAUDE_HOME"; printf "\n" >&2
 
   if ! git -C "$CLAUDE_HOME" log -1 --oneline &>/dev/null 2>&1; then
     log_warn "No commits yet."
@@ -551,7 +551,7 @@ sync_diff() {
   _behind="$(git -C "$CLAUDE_HOME" rev-list --count "HEAD..$_remote" 2>/dev/null || echo 0)"
 
   printf "\n"
-  log_info "Diff — $CLAUDE_HOME  (branch: $_branch)\n"
+  log_info "Diff — $CLAUDE_HOME  (branch: $_branch)"; printf "\n" >&2
 
   if [[ "$_ahead" -eq 0 ]] && [[ "$_behind" -eq 0 ]]; then
     log_success "Up to date with remote — nothing to diff."

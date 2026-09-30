@@ -276,7 +276,7 @@ _profile_list_all_display() {
   current_active="$(_profile_get_active)"
 
   printf "\n" >&2
-  log_info "Configured profiles:\n"
+  log_info "Configured profiles:"; printf "\n" >&2
   while IFS= read -r n; do
     [[ -z "$n" ]] && continue
     local u
