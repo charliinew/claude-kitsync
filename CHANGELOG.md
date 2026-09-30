@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.7] — 2026-09-30
+
+### Fixed
+- **Installer: `KITSYNC_REMOTE` was never seen** — the documented `KITSYNC_REMOTE=… curl … | bash` only sets the variable for `curl`. Docs now use `curl … | KITSYNC_REMOTE=… bash`, and no longer claim a prompt-free setup.
+- **Installer: Ctrl+C in a menu selected the highlighted option** instead of aborting.
+- **Installer: an existing `~/.claude` git repo not set up by kitsync skipped `init` entirely** (no allowlist, no remote) while reporting success. `init` now runs; only a repo already configured by kitsync is left as is.
+- **Installer: GitHub repos were always wired with an SSH URL**; the URL now follows `gh`'s configured git protocol.
+- Installer shows git's actual error when cloning or updating fails.
+- `upgrade --dev` works on installs sitting on a release tag (detached HEAD).
+- `uninstall` also cleans `~/.bash_profile` (used for bash on macOS) and removes the completion setup.
+
+### Changed
+- **The installer installs the latest release** (same channel as `upgrade`) instead of `main`; pin with `KITSYNC_VERSION=vX.Y.Z` or `KITSYNC_VERSION=main`.
+- **Verifiable installer**: `install.sh` is published with each release and listed in `SHA256SUMS` (see README "Verified install").
+- Completions are loaded by your rc file straight from the install dir — no more links in Homebrew's prefix or in `~/.zsh/completions` (which zsh never searched). Old links, including dangling ones, are removed.
+- Tests no longer run the real installer against the network (it used to leave completion links in the Homebrew prefix); an offline re-run test replaces it.
+
 ## [1.1.6] — 2026-09-30
 
 ### Fixed
