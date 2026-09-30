@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.6] — 2026-09-30
+
+### Fixed
+- **`upgrade` could downgrade.** It only checked that the installed version differed from the latest GitHub release, so right after a new tag was pushed (before its release existed) it "upgraded" back to the previous version. Versions are now compared numerically and `upgrade` never goes backwards.
+
 ## [1.1.5] — 2026-09-30
 
 ### Changed
