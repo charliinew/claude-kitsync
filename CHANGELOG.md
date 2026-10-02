@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.12] — 2026-10-03
+
+### Fixed
+- **Re-running `init` wiped `.kitsync/config`**: the encryption flag (settings silently stopped syncing), every other profile and the upgrade channel were lost. `init` now only updates its own keys, offers to keep the current sync preferences, and defaults the profile name to the active profile.
+- **`init`'s GitHub menu always used an SSH URL** (fixed in `install.sh` in 1.1.7, not here): the URL now follows `gh`'s git protocol.
+- **LOCAL choices were overwritten on the first push**: when the remote already had history, `init` rebased with `-X ours`, which in a rebase means the remote. It now uses `-X theirs` (your choices win), aborts cleanly on failure, and shows git's error.
+- **An existing non-allowlist `.gitignore` was kept**, leaving conversations and caches pushable. `init` now backs it up and installs the allowlist (asked in a terminal, default otherwise), and stops tracking files it excludes (kept on disk).
+- **Without a terminal, the starter kit was imported in full** and pushed. Nothing is imported without a terminal now.
+
+### Changed
+- Prompts return their default without a terminal on purpose instead of by accident; `KITSYNC_NO_TTY=1` forces it.
+
 ## [1.1.11] — 2026-10-02
 
 ### Changed
