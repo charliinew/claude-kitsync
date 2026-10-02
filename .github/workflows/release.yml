@@ -20,32 +20,24 @@ jobs:
       - name: Create release tarball
         run: |
           tar -czf claude-kitsync-${{ github.ref_name }}.tar.gz \
-            bin/ lib/ kit/ templates/ completions/ VERSION README.md install.sh
+            bin/ lib/ keys/ kit/ templates/ completions/ VERSION README.md install.sh
 
       - name: Generate SHA256SUMS
         run: |
           sha256sum claude-kitsync-${{ github.ref_name }}.tar.gz install.sh > SHA256SUMS
 
-      # `secrets` is not available in step-level `if:` — expose it through a step output
-      - name: Check for signing key
-        id: gpg
+      # Signing is mandatory: `claude-kitsync upgrade` refuses unsigned releases
+      - name: Import GPG key
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: |
-          if [ -n "$GPG_PRIVATE_KEY" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+            echo "::error::GPG_PRIVATE_KEY secret is missing — releases must be signed"
+            exit 1
           fi
-
-      - name: Import GPG key
-        if: steps.gpg.outputs.enabled == 'true'
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-        run: printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
 
       - name: Sign release artifacts
-        if: steps.gpg.outputs.enabled == 'true'
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
@@ -54,8 +46,16 @@ jobs:
           echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
             --detach-sign --armor SHA256SUMS
 
-      - name: Create GitHub Release (with signatures)
-        if: steps.gpg.outputs.enabled == 'true'
+      # Same check as upgrade: a throwaway keyring holding only the published key
+      - name: Verify signature against keys/release-signing.asc
+        run: |
+          GNUPGHOME="$(mktemp -d)"
+          export GNUPGHOME
+          gpg --batch --import keys/release-signing.asc
+          gpg --batch --verify SHA256SUMS.asc SHA256SUMS
+          gpg --batch --verify claude-kitsync-${{ github.ref_name }}.tar.gz.asc claude-kitsync-${{ github.ref_name }}.tar.gz
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
@@ -65,16 +65,6 @@ jobs:
             install.sh
             SHA256SUMS
             SHA256SUMS.asc
-
-      - name: Create GitHub Release (without signatures)
-        if: steps.gpg.outputs.enabled != 'true'
-        uses: softprops/action-gh-release@v3
-        with:
-          generate_release_notes: true
-          files: |
-            claude-kitsync-${{ github.ref_name }}.tar.gz
-            install.sh
-            SHA256SUMS
 
       # Point the formula at the release tarball built above: its checksum is the
       # one published in SHA256SUMS, unlike GitHub's on-the-fly source archives

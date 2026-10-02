@@ -219,8 +219,8 @@ run_test_reg_normalize_scope() {
 }
 
 run_test_reg_upgrade_never_downgrades() {
-  # Load only _version_lt from the CLI (sourcing bin/ would run main)
-  eval "$(awk '/^_version_lt\(\) \{/,/^\}/' "$_PROJECT_ROOT/bin/claude-kitsync")"
+  # Load only _version_lt (sourcing lib/upgrade.sh twice would hit readonly vars)
+  eval "$(awk '/^_version_lt\(\) \{/,/^\}/' "$_PROJECT_ROOT/lib/upgrade.sh")"
 
   local pair a b expected got
   for pair in "1.1.4:1.1.5:lt" "1.1.5:1.1.4:ge" "1.1.5:1.1.5:ge" \

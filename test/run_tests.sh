@@ -40,6 +40,7 @@ source "$_RUNNER_DIR/test_install_kit.sh"
 source "$_RUNNER_DIR/test_idempotent.sh"
 source "$_RUNNER_DIR/test_wrapper.sh"
 source "$_RUNNER_DIR/test_regressions.sh"
+source "$_RUNNER_DIR/test_upgrade.sh"
 
 # Some sourced lib files (lib/core.sh, lib/wrapper.sh) call set -euo pipefail,
 # which activates -e in this shell. Re-disable it — the runner intentionally
@@ -64,6 +65,7 @@ case "$_FILTER" in
     run_idempotent_tests
     run_wrapper_tests
     run_regressions_tests
+    run_upgrade_tests
     ;;
   gitignore)
     run_gitignore_tests
@@ -86,8 +88,11 @@ case "$_FILTER" in
   regressions)
     run_regressions_tests
     ;;
+  upgrade)
+    run_upgrade_tests
+    ;;
   *)
-    printf "Unknown filter '%s'. Valid: all, gitignore, paths, sync, install, idempotent, wrapper, regressions\n" "$_FILTER" >&2
+    printf "Unknown filter '%s'. Valid: all, gitignore, paths, sync, install, idempotent, wrapper, regressions, upgrade\n" "$_FILTER" >&2
     exit 1
     ;;
 esac

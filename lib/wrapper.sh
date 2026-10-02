@@ -272,6 +272,8 @@ _backup_rc() {
   timestamp="$(date '+%Y%m%dT%H%M%S')"
   backup_path="$backup_dir/${basename}.${timestamp}.bak"
 
+  # Two edits within the same second: keep the first snapshot (the original)
+  [[ -e "$backup_path" ]] && return 0
   cp "$rc_file" "$backup_path" || return 0
 
   # Prune: keep only the 5 most recent backups for this rc file
@@ -443,4 +445,66 @@ _remove_path_from_rc() {
     "$rc_file" > "$tmp_file"
   mv "$tmp_file" "$rc_file"
   log_info "Removed PATH entry from $rc_file"
+}
+
+# ---------------------------------------------------------------------------
+# _completion_block <zsh|bash> <completions_dir> — the completion block
+# install.sh writes into the rc file (keep both in sync)
+# ---------------------------------------------------------------------------
+_completion_block() {
+  local shell="$1" dir="$2"
+  printf '# claude-kitsync completion\n'
+  case "$shell" in
+    zsh)
+      # shellcheck disable=SC2016
+      printf 'fpath=("%s" $fpath)\n' "$dir"
+      # shellcheck disable=SC2016
+      printf '(( $+functions[compdef] )) && { autoload -Uz _claude-kitsync && compdef _claude-kitsync claude-kitsync; }\n'
+      ;;
+    bash)
+      printf '[ -f "%s/claude-kitsync.bash" ] && . "%s/claude-kitsync.bash"\n' "$dir" "$dir"
+      ;;
+  esac
+  printf '# claude-kitsync completion end\n'
+}
+
+# _rc_block <rc_file> <start_line> <end_line> — print a block, markers included
+_rc_block() {
+  awk -v s="$2" -v e="$3" '$0 == s {on=1} on {print} on && $0 == e {exit}' "$1"
+}
+
+# ---------------------------------------------------------------------------
+# refresh_shell_setup — bring rc blocks written by an older version up to date
+#
+# The wrapper and completion blocks are copied into the rc file at install
+# time, so upgrading the tool alone leaves the old copies in place. Only
+# blocks that already exist (wrapper) or belong to a script install (PATH line)
+# are touched, and a file is rewritten only when its content changed.
+# ---------------------------------------------------------------------------
+refresh_shell_setup() {
+  local rc shell want
+  for rc in "${ZDOTDIR:-$HOME}/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
+    [[ -f "$rc" ]] || continue
+
+    if grep -qxF "$WRAPPER_START_MARKER" "$rc" 2>/dev/null && \
+       [[ "$(_rc_block "$rc" "$WRAPPER_START_MARKER" "$WRAPPER_END_MARKER")" != "$(_render_wrapper)" ]]; then
+      _inject_into_rc "$rc"
+      log_success "Shell wrapper updated in $rc"
+    fi
+
+    # Completion: script installs only (Homebrew installs its own)
+    grep -qF "kitsync PATH" "$rc" 2>/dev/null || continue
+    [[ -d "$KITSYNC_ROOT/completions" ]] || continue
+    case "$rc" in
+      */.zshrc) shell=zsh ;;
+      *)        shell=bash ;;
+    esac
+    want="$(_completion_block "$shell" "$KITSYNC_ROOT/completions")"
+    if [[ "$(_rc_block "$rc" "# claude-kitsync completion" "# claude-kitsync completion end")" != "$want" ]]; then
+      _backup_rc "$rc"
+      _remove_completion_from_rc "$rc" >/dev/null 2>&1
+      printf '\n%s\n' "$want" >> "$rc"
+      log_success "Shell completion updated in $rc"
+    fi
+  done
 }

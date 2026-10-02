@@ -36,6 +36,7 @@ source "$KITSYNC_ROOT/lib/publish.sh"
 source "$KITSYNC_ROOT/lib/settings.sh"
 source "$KITSYNC_ROOT/lib/profiles.sh"
 source "$KITSYNC_ROOT/lib/crypto.sh"
+source "$KITSYNC_ROOT/lib/upgrade.sh"
 
 # ---------------------------------------------------------------------------
 # version
@@ -67,7 +68,7 @@ _usage() {
     ${_CLR_CYAN}profile${_CLR_RESET} [list|add|switch|remove]  Manage sync profiles (work, perso...)
     ${_CLR_CYAN}encrypt${_CLR_RESET} [enable|disable|rotate|status]  Encrypt settings.json before push
     ${_CLR_CYAN}settings${_CLR_RESET}                Change sync preferences (pull/push mode)
-    ${_CLR_CYAN}upgrade${_CLR_RESET} [--dev]            Update to the latest stable release (--dev: latest commit)
+    ${_CLR_CYAN}upgrade${_CLR_RESET} [--dev] [--force]  Update to the latest signed release (--dev: latest commit)
     ${_CLR_CYAN}doctor${_CLR_RESET}                  Run health checks on your setup
     ${_CLR_CYAN}restore${_CLR_RESET}                 Restore a rc file from a kitsync backup
     ${_CLR_CYAN}uninstall${_CLR_RESET}               Remove claude-kitsync completely
@@ -263,139 +264,6 @@ cmd_uninstall() {
 }
 
 # ---------------------------------------------------------------------------
-# cmd_upgrade — update claude-kitsync to the latest stable release, or latest commit (dev mode)
-# Usage: claude-kitsync upgrade [--dev]
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# _version_lt <a> <b> — true if version a is strictly lower than b
-# (numeric major.minor.patch; non-digit suffixes are ignored)
-# ---------------------------------------------------------------------------
-_version_lt() {
-  local IFS=.
-  local -a _a=($1) _b=($2)
-  local i x y
-  for i in 0 1 2; do
-    x="${_a[i]:-0}"; x="${x//[^0-9]/}"; x="${x:-0}"
-    y="${_b[i]:-0}"; y="${y//[^0-9]/}"; y="${y:-0}"
-    (( 10#$x < 10#$y )) && return 0
-    (( 10#$x > 10#$y )) && return 1
-  done
-  return 1
-}
-
-cmd_upgrade() {
-  local _dev_mode=false
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --dev) _dev_mode=true; shift ;;
-      *) die "Unknown option: $1 (usage: claude-kitsync upgrade [--dev])" ;;
-    esac
-  done
-
-  if _installed_via_brew; then
-    log_info "claude-kitsync is managed by Homebrew — run: brew upgrade claude-kitsync"
-    return 0
-  fi
-
-  if [[ ! -d "$KITSYNC_ROOT/.git" ]]; then
-    log_warn "KITSYNC_ROOT is not a git repo — can't auto-upgrade."
-    log_warn "Re-run the installer: curl -fsSL https://raw.githubusercontent.com/charliinew/claude-kitsync/main/install.sh | bash"
-    return 1
-  fi
-
-  # Check config for dev channel if flag not set
-  if [[ "$_dev_mode" != true ]]; then
-    local _channel
-    _channel="$(grep '^KITSYNC_UPGRADE_CHANNEL=' "$CLAUDE_HOME/.kitsync/config" 2>/dev/null | cut -d= -f2- || true)"
-    [[ "$_channel" == "dev" ]] && _dev_mode=true
-  fi
-
-  # ---------------------------------------------------------------------------
-  # Dev mode — latest commit on main
-  # ---------------------------------------------------------------------------
-  if [[ "$_dev_mode" == true ]]; then
-    log_step "Upgrading to latest commit (dev channel)..."
-    local before_sha after_sha
-    before_sha="$(git -C "$KITSYNC_ROOT" rev-parse --short HEAD 2>/dev/null || echo '?')"
-    # Installs are shallow clones that may sit on a release tag (detached
-    # HEAD), so move to origin/main explicitly instead of pulling
-    if git -C "$KITSYNC_ROOT" fetch -q --depth 1 origin main 2>/dev/null && \
-       git -C "$KITSYNC_ROOT" reset -q --hard FETCH_HEAD 2>/dev/null; then
-      after_sha="$(git -C "$KITSYNC_ROOT" rev-parse --short HEAD 2>/dev/null || echo '?')"
-      if [[ "$before_sha" == "$after_sha" ]]; then
-        log_success "Already up to date  ($after_sha)"
-      else
-        log_success "Upgraded: $before_sha → $after_sha"
-      fi
-    else
-      log_warn "Upgrade failed — check your network and try again."
-      return 1
-    fi
-    return 0
-  fi
-
-  # ---------------------------------------------------------------------------
-  # Stable mode — latest GitHub release
-  # ---------------------------------------------------------------------------
-  log_step "Checking latest release..."
-
-  local latest_tag=""
-
-  # Try GitHub API (returns latest non-pre-release)
-  if command -v curl &>/dev/null; then
-    latest_tag="$(curl -fsSL \
-      "https://api.github.com/repos/charliinew/claude-kitsync/releases/latest" \
-      2>/dev/null | grep '"tag_name"' | head -1 | \
-      sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')"
-  fi
-
-  # Fallback: git ls-remote (picks highest semver tag)
-  if [[ -z "$latest_tag" ]]; then
-    latest_tag="$(git ls-remote --tags --sort=-v:refname \
-      "https://github.com/charliinew/claude-kitsync" 'refs/tags/v*' 2>/dev/null \
-      | grep -v '\^{}' | head -1 | sed 's|.*refs/tags/||')"
-  fi
-
-  if [[ -z "$latest_tag" ]]; then
-    log_warn "Could not determine latest release — check your network."
-    log_info "Tip: use --dev to upgrade to the latest commit instead."
-    return 1
-  fi
-
-  local current_version
-  current_version="$(cat "$KITSYNC_ROOT/VERSION" 2>/dev/null || echo "0.0.0")"
-  local latest_version="${latest_tag#v}"
-
-  # Never downgrade: the API's "latest" lags behind a freshly pushed tag
-  # until its release workflow has finished
-  if ! _version_lt "$current_version" "$latest_version"; then
-    log_success "Already up to date  (v$current_version)"
-    return 0
-  fi
-
-  log_info "Current: v$current_version  →  Latest: $latest_tag"
-  log_step "Downloading release $latest_tag..."
-
-  # Fetch the specific tag commit (shallow, only what we need)
-  if ! git -C "$KITSYNC_ROOT" fetch -q --depth 1 origin \
-       "refs/tags/$latest_tag" 2>/dev/null; then
-    log_warn "Fetch failed — check your network and try again."
-    return 1
-  fi
-
-  # Reset working tree to the fetched commit
-  if ! git -C "$KITSYNC_ROOT" reset -q --hard FETCH_HEAD 2>/dev/null; then
-    log_warn "Could not apply release $latest_tag."
-    return 1
-  fi
-
-  local new_version
-  new_version="$(cat "$KITSYNC_ROOT/VERSION" 2>/dev/null || echo "$latest_tag")"
-  log_success "Upgraded: v$current_version → v$new_version"
-}
-
-# ---------------------------------------------------------------------------
 # _post_pull_hook — internal hook called by shell wrapper after background pull
 # Decrypts encrypted files (if enabled), then normalises paths in settings.json.
 # ---------------------------------------------------------------------------
@@ -411,6 +279,14 @@ _post_pull_hook() {
 # ---------------------------------------------------------------------------
 main() {
   local cmd="${1:-}"
+
+  # rc blocks still from an older version (Homebrew upgrade, or an upgrade run
+  # by a version without post_upgrade): refresh them once. Skipped for internal
+  # commands and background auto-push, which run from the wrapper itself.
+  case "$cmd" in
+    _*|""|-h|--help|help|-v|--version|version|uninstall|upgrade) ;;
+    *) [[ " $* " == *" --auto "* ]] || ensure_shell_setup || true ;;
+  esac
 
   case "$cmd" in
     init)
@@ -478,6 +354,11 @@ main() {
       ;;
     _post-pull-hook)
       _post_pull_hook
+      ;;
+    _post-upgrade)
+      # Internal: run by upgrade in the freshly installed version
+      shift
+      post_upgrade "${1:-}"
       ;;
     _install-wrapper)
       # Internal: called by install.sh on re-install to ensure wrapper is active

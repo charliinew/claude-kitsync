@@ -27,6 +27,9 @@ _claude_kitsync() {
     log)
       COMPREPLY=($(compgen -W "-n" -- "$cur"))
       ;;
+    upgrade)
+      COMPREPLY=($(compgen -W "--dev --force --no-verify" -- "$cur"))
+      ;;
     install)
       COMPREPLY=()
       ;;

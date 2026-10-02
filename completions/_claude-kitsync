@@ -48,6 +48,12 @@ _claude_kitsync() {
           _arguments \
             '-n[Number of commits to show]:count:' \
           ;;
+        upgrade)
+          _arguments \
+            '--dev[Upgrade to the latest commit on main]' \
+            '--force[Discard local changes in the install directory]' \
+            '--no-verify[Skip the release signature check]' \
+          ;;
         install)
           _arguments \
             ':kit url:_urls' \

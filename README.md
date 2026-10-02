@@ -30,13 +30,16 @@ This skips the storage question; `init` still asks for a profile name and your s
 
 The installer installs the latest release. Pin a version with `KITSYNC_VERSION=v1.1.6`, or follow development with `KITSYNC_VERSION=main`.
 
-**Verified install** — check the installer against the release checksums before running it:
+**Verified install** — check the installer against the signed release checksums before running it:
 
 ```bash
-curl -fsSLO https://github.com/charliinew/claude-kitsync/releases/latest/download/install.sh
-curl -fsSLO https://github.com/charliinew/claude-kitsync/releases/latest/download/SHA256SUMS
-shasum -a 256 -c --ignore-missing SHA256SUMS && bash install.sh
+B=https://github.com/charliinew/claude-kitsync/releases/latest/download
+curl -fsSLO "$B/install.sh" -O "$B/SHA256SUMS" -O "$B/SHA256SUMS.asc"
+curl -fsSL https://raw.githubusercontent.com/charliinew/claude-kitsync/main/keys/release-signing.asc | gpg --import
+gpg --verify SHA256SUMS.asc SHA256SUMS && shasum -a 256 -c --ignore-missing SHA256SUMS && bash install.sh
 ```
+
+`gpg --verify` must report a good signature from key `592A 3F38 2C54 2ABA A60A  AED6 6F6E C0A5 1AFF 673D` (claude-kitsync release signing). Releases from v1.1.9 on are signed, and `claude-kitsync upgrade` checks this signature itself before installing a new version.
 
 **Via Homebrew:**
 
@@ -67,7 +70,7 @@ Use one install method only: Homebrew (`brew upgrade claude-kitsync`) or the scr
 | `claude-kitsync encrypt [enable\|disable\|rotate\|status]` | Encrypt `settings.json` with AES-256 before push (opt-in) |
 | `claude-kitsync settings` | Interactive menu to change pull/push mode, remote URL, wrapper |
 | `claude-kitsync doctor` | Diagnose the health of your setup |
-| `claude-kitsync upgrade` | Update claude-kitsync to the latest version |
+| `claude-kitsync upgrade` | Update claude-kitsync to the latest release (signature checked, release notes shown) |
 | `claude-kitsync uninstall` | Fully remove claude-kitsync (binary, PATH, shell wrapper) |
 
 ---
