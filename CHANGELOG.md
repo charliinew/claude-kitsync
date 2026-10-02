@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.10] — 2026-10-02
+
+### Fixed
+- **`uninstall` deleted whatever directory it ran from**: run from a dev checkout, or after an install with `KITSYNC_INSTALL_DIR`, it erased that working copy. It now deletes only the installer's own clone (`~/.local/share/kitsync`) and leaves any other directory in place with a warning.
+- **`uninstall` asked nothing**: it now lists what it will remove and what it keeps, and asks first (`--yes` for scripts; without a terminal it refuses).
+- **`uninstall` could remove another install's binary** (e.g. Homebrew's link, first in PATH): it now removes only links pointing to its own install.
+- **rc edits replaced a symlinked rc file** (dotfiles repo) with a plain copy and reset its permissions to 600. Edits are now written in place.
+- **Removing the PATH entry deleted the line after the marker blindly**, even when it was no longer the `export PATH=` line. PATH and completion removals now also back up the rc file first.
+
+### Changed
+- `uninstall` removes the machine-local state file added in 1.1.9 and says what remains (`~/.claude`, its history and remote).
+
 ## [1.1.9] — 2026-10-02
 
 ### Security
