@@ -54,6 +54,10 @@ _claude_kitsync() {
             '--force[Discard local changes in the install directory]' \
             '--no-verify[Skip the release signature check]' \
           ;;
+        uninstall)
+          _arguments \
+            '(-y --yes)'{-y,--yes}'[Do not ask for confirmation]' \
+          ;;
         install)
           _arguments \
             ':kit url:_urls' \

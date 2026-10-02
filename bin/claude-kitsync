@@ -71,7 +71,7 @@ _usage() {
     ${_CLR_CYAN}upgrade${_CLR_RESET} [--dev] [--force]  Update to the latest signed release (--dev: latest commit)
     ${_CLR_CYAN}doctor${_CLR_RESET}                  Run health checks on your setup
     ${_CLR_CYAN}restore${_CLR_RESET}                 Restore a rc file from a kitsync backup
-    ${_CLR_CYAN}uninstall${_CLR_RESET}               Remove claude-kitsync completely
+    ${_CLR_CYAN}uninstall${_CLR_RESET} [--yes]         Remove claude-kitsync (keeps ~/.claude)
 
   ${_CLR_BOLD}Options${_CLR_RESET}
     -h, --help                Show this help
@@ -209,58 +209,123 @@ _installed_via_brew() {
 }
 
 # ---------------------------------------------------------------------------
-# cmd_uninstall — full removal of claude-kitsync
-#   1. Remove shell wrapper (claude() function) from rc files
-#   2. Remove PATH injection from rc files
-#   3. Remove binary symlink
-#   4. Remove installation directory
+# _managed_install_dir — true when KITSYNC_ROOT is the installer's own clone.
+# A dev checkout or a KITSYNC_INSTALL_DIR install is someone's working copy:
+# uninstall must never delete it.
+# ---------------------------------------------------------------------------
+_managed_install_dir() {
+  local root managed
+  root="$(cd "$KITSYNC_ROOT" 2>/dev/null && pwd -P)" || return 1
+  managed="$(cd "$HOME/.local/share/kitsync" 2>/dev/null && pwd -P)" || return 1
+  [[ "$root" == "$managed" ]]
+}
+
+# _kitsync_links — symlinks to this install's binary (user and system bin dirs,
+# plus whatever PATH resolves); links of another install are left alone
+_kitsync_links() {
+  local target link dest seen=""
+  target="$(cd "$KITSYNC_ROOT/bin" 2>/dev/null && pwd -P)/claude-kitsync"
+  for link in "$HOME/.local/bin/claude-kitsync" "/usr/local/bin/claude-kitsync" \
+              "$(command -v claude-kitsync 2>/dev/null || true)"; do
+    [[ -n "$link" && -L "$link" ]] || continue
+    [[ " $seen " == *" $link "* ]] && continue
+    seen="$seen $link"
+    dest="$(readlink "$link")"
+    [[ "$dest" = /* ]] || dest="$(dirname "$link")/$dest"
+    dest="$(cd "$(dirname "$dest")" 2>/dev/null && pwd -P)/$(basename "$dest")"
+    [[ "$dest" == "$target" ]] && printf '%s\n' "$link"
+  done
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# cmd_uninstall — remove claude-kitsync (never ~/.claude or its remote)
+#   1. Shell wrapper, PATH entry and completion block from rc files
+#   2. Binary symlinks pointing to this install
+#   3. Installation directory — only the installer's own clone
+# Usage: claude-kitsync uninstall [--yes]
 # ---------------------------------------------------------------------------
 cmd_uninstall() {
-  printf "\n"
-  log_info "Uninstalling claude-kitsync..."; printf "\n" >&2
+  local _yes=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -y|--yes) _yes=true; shift ;;
+      *) die "Unknown option: $1 (usage: claude-kitsync uninstall [--yes])" ;;
+    esac
+  done
 
-  # Step 1: Remove shell wrapper block from rc files
+  local _brew=false _delete_root=false
+  _installed_via_brew && _brew=true
+  if [[ "$_brew" == false ]] && _managed_install_dir; then
+    _delete_root=true
+  fi
+  local -a _links=()
+  local _l
+  if [[ "$_brew" == false ]]; then
+    while IFS= read -r _l; do [[ -n "$_l" ]] && _links+=("$_l"); done < <(_kitsync_links)
+  fi
+
+  printf "\n" >&2
+  log_info "This will remove:"
+  if [[ "$_brew" == true ]]; then
+    printf '    - the claude() wrapper from your shell rc files\n' >&2
+  else
+    printf '    - the claude() wrapper, PATH entry and completion from your shell rc files\n' >&2
+  fi
+  for _l in ${_links[@]+"${_links[@]}"}; do printf '    - %s\n' "$_l" >&2; done
+  [[ "$_delete_root" == true ]] && printf '    - %s\n' "$KITSYNC_ROOT" >&2
+  log_info "Kept: $CLAUDE_HOME (your config, its git history and remote)."
+  if [[ "$_yes" != true ]] && ! confirm "Uninstall claude-kitsync?"; then
+    if [[ -t 0 ]]; then
+      log_info "Cancelled."
+    else
+      log_info "Cancelled — no terminal to confirm. Pass --yes to uninstall anyway."
+    fi
+    return 1
+  fi
+  printf "\n" >&2
+
   remove_wrapper
+  rm -f "$(_shell_stamp_file)" 2>/dev/null || true
+  rmdir "$(dirname "$(_shell_stamp_file)")" 2>/dev/null || true
 
   # Homebrew owns the binary and the install dir (inside its Cellar):
   # deleting them here would leave a corrupted formula behind
-  if _installed_via_brew; then
-    printf "\n"
+  if [[ "$_brew" == true ]]; then
+    printf "\n" >&2
     log_info "Finish with: brew uninstall claude-kitsync"
-    printf "\n"
+    printf "\n" >&2
     return 0
   fi
 
-  # Step 2: Remove PATH entry and completion block from rc files
-  # (install.sh writes to ~/.bash_profile for bash on macOS)
+  # PATH entry and completion block (install.sh writes to ~/.bash_profile
+  # for bash on macOS)
   local _rc
   for _rc in "${ZDOTDIR:-$HOME}/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
     _remove_path_from_rc "$_rc"
     _remove_completion_from_rc "$_rc"
   done
 
-  # Step 3: Remove binary symlink (find it via PATH lookup)
-  local bin_symlink
-  bin_symlink="$(command -v claude-kitsync 2>/dev/null || true)"
-  if [[ -n "$bin_symlink" ]] && [[ -L "$bin_symlink" ]]; then
-    rm "$bin_symlink"
-    log_success "Removed binary: $bin_symlink"
-  elif [[ -L "$HOME/.local/bin/claude-kitsync" ]]; then
-    rm "$HOME/.local/bin/claude-kitsync"
-    log_success "Removed binary: $HOME/.local/bin/claude-kitsync"
-  fi
+  for _l in ${_links[@]+"${_links[@]}"}; do
+    if rm -f "$_l" 2>/dev/null; then
+      log_success "Removed binary: $_l"
+    else
+      log_warn "Could not remove $_l (try: sudo rm $_l)"
+    fi
+  done
 
-  # Step 4: Remove installation directory
-  # KITSYNC_ROOT is already set to the install dir (libs are loaded, safe to delete)
-  if [[ -d "$KITSYNC_ROOT" ]]; then
+  if [[ "$_delete_root" == true ]]; then
     rm -rf "$KITSYNC_ROOT"
     log_success "Removed installation: $KITSYNC_ROOT"
+  else
+    log_warn "Left in place: $KITSYNC_ROOT (not the installer's directory — delete it yourself if you want)"
   fi
 
-  printf "\n"
-  log_success "claude-kitsync fully uninstalled."
+  printf "\n" >&2
+  log_success "claude-kitsync uninstalled."
+  log_info "$CLAUDE_HOME is still a git repo synced with your remote; it keeps working with plain git."
   log_info "Run 'exec \$SHELL' or open a new terminal to complete the removal."
-  printf "\n"
+  printf "\n" >&2
 }
 
 # ---------------------------------------------------------------------------
@@ -350,7 +415,8 @@ main() {
       cmd_upgrade "$@"
       ;;
     uninstall)
-      cmd_uninstall
+      shift
+      cmd_uninstall "$@"
       ;;
     _post-pull-hook)
       _post_pull_hook

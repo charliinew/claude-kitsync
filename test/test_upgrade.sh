@@ -11,7 +11,7 @@ source "$_HELPERS_DIR/helpers.sh"
 # from libs already sourced into the runner would abort a re-source)
 _upg_run() {
   local h="$1"; shift
-  HOME="$h" CLAUDE_HOME="$h/.claude" XDG_STATE_HOME="$h/.state" \
+  HOME="$h" ZDOTDIR="$h" CLAUDE_HOME="$h/.claude" XDG_STATE_HOME="$h/.state" \
     KITSYNC_ROOT="${_UPG_KS_ROOT:-$_PROJECT_ROOT}" _UPG_LIBS="$_PROJECT_ROOT/lib" \
     bash -c '
       for _lib in core wrapper upgrade; do

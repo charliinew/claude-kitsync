@@ -283,6 +283,16 @@ _backup_rc() {
 }
 
 # ---------------------------------------------------------------------------
+# _rc_write <tmp> <rc> — replace a rc file's content with <tmp>, in place:
+# a symlinked rc (dotfiles repo) stays a symlink, and permissions are kept
+# (mv would put mktemp's 600 regular file in its place)
+# ---------------------------------------------------------------------------
+_rc_write() {
+  cat "$1" > "$2"
+  rm -f "$1"
+}
+
+# ---------------------------------------------------------------------------
 # _inject_into_rc — idempotent injection of wrapper block into a rc file
 #
 # If markers already exist: replaces the block between them.
@@ -325,7 +335,7 @@ _inject_into_rc() {
     ' "$rc_file" > "$tmp_file"
 
     rm -f "$new_block_file"
-    mv "$tmp_file" "$rc_file"
+    _rc_write "$tmp_file" "$rc_file"
   else
     # No markers — append block at end of file
     log_info "Adding kitsync wrapper to $rc_file"
@@ -360,7 +370,7 @@ _remove_from_rc() {
   !in_block { print }
   ' "$rc_file" > "$tmp_file"
 
-  mv "$tmp_file" "$rc_file"
+  _rc_write "$tmp_file" "$rc_file"
 }
 
 # ---------------------------------------------------------------------------
@@ -420,12 +430,13 @@ _remove_completion_from_rc() {
   [[ -f "$rc_file" ]] || return 0
   grep -qF "# claude-kitsync completion" "$rc_file" 2>/dev/null || return 0
 
+  _backup_rc "$rc_file"
   local tmp_file
   tmp_file="$(mktemp)"
   awk '/^# claude-kitsync completion$/{skip=1; next}
        /^# claude-kitsync completion end$/{skip=0; next}
        !skip' "$rc_file" > "$tmp_file"
-  mv "$tmp_file" "$rc_file"
+  _rc_write "$tmp_file" "$rc_file"
   log_info "Removed completion setup from $rc_file"
 }
 
@@ -438,12 +449,15 @@ _remove_path_from_rc() {
   if [[ ! -f "$rc_file" ]]; then return 0; fi
   if ! grep -qF "kitsync PATH" "$rc_file" 2>/dev/null; then return 0; fi
 
+  _backup_rc "$rc_file"
   local tmp_file
   tmp_file="$(mktemp)"
-  # Remove the marker line and the export PATH line that follows it
-  awk '/^# kitsync PATH$|^# claude-kitsync PATH$/{skip=1; next} skip{skip=0; next} {print}' \
-    "$rc_file" > "$tmp_file"
-  mv "$tmp_file" "$rc_file"
+  # Remove the marker line and the export PATH line that follows it — only if
+  # it still is one (a user-edited rc must not lose an unrelated line)
+  awk '/^# kitsync PATH$|^# claude-kitsync PATH$/{skip=1; next}
+       skip { skip=0; if ($0 ~ /^export PATH=/) next }
+       {print}' "$rc_file" > "$tmp_file"
+  _rc_write "$tmp_file" "$rc_file"
   log_info "Removed PATH entry from $rc_file"
 }
 
