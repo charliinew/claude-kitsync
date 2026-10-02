@@ -76,15 +76,16 @@ jobs:
             install.sh
             SHA256SUMS
 
-      - name: Compute SHA256 of source archive for Homebrew
+      # Point the formula at the release tarball built above: its checksum is the
+      # one published in SHA256SUMS, unlike GitHub's on-the-fly source archives
+      - name: Compute SHA256 of release tarball for Homebrew
         id: sha256
         run: |
           TAG=${{ github.ref_name }}
-          URL="https://github.com/charliinew/claude-kitsync/archive/refs/tags/${TAG}.tar.gz"
-          curl -fsSL "$URL" -o source-archive.tar.gz
-          SHA=$(sha256sum source-archive.tar.gz | awk '{print $1}')
+          FILE="claude-kitsync-${TAG}.tar.gz"
+          SHA=$(sha256sum "$FILE" | awk '{print $1}')
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "url=https://github.com/charliinew/claude-kitsync/releases/download/${TAG}/${FILE}" >> "$GITHUB_OUTPUT"
 
       - name: Update Homebrew formula on main
         env:

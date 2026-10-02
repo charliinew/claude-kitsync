@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- **Homebrew formula now downloads the release tarball** instead of GitHub's auto-generated source archive. Its checksum is the one published in `SHA256SUMS`, and it cannot change between downloads.
+
 ## [1.1.8] — 2026-09-30
 
 ### Fixed
