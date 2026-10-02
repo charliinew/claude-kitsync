@@ -1,6 +1,19 @@
 # Changelog
 
-## [Unreleased]
+## [1.1.9] — 2026-10-02
+
+### Security
+- **Releases are signed**: the release workflow signs `SHA256SUMS` and the tarball with a dedicated key (`keys/release-signing.asc`, fingerprint `592A3F382C542ABAA60AAED66F6EC0A51AFF673D`) and fails without it. `upgrade` checks the signature, the tarball checksum and that the fetched tag matches the tarball before installing anything; `--no-verify` skips the check. Without `gpg` installed, the check is skipped with a warning.
+
+### Fixed
+- **`upgrade` left the shell wrapper and completion block of the old version in your rc file**: they are copied there at install time and were never refreshed. They are now updated after an upgrade, and on the first run of a new version installed another way (Homebrew, or an `upgrade` run by an older version).
+- **`upgrade` hid git's error messages** behind "check your network".
+- **`upgrade` silently discarded local changes** in the install directory: it now lists them and asks first (`--force` to skip).
+- **rc backups**: two edits within the same second overwrote the backup of the original file with the intermediate one.
+- **`upgrade`'s fallback** (when the GitHub API is unreachable) would have picked a pre-release tag such as `v1.2.0-rc1`.
+
+### Added
+- `upgrade` prints the release notes of the versions it installs.
 
 ### Changed
 - **Homebrew formula now downloads the release tarball** instead of GitHub's auto-generated source archive. Its checksum is the one published in `SHA256SUMS`, and it cannot change between downloads.
