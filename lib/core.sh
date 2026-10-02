@@ -93,6 +93,28 @@ confirm() {
 }
 
 # ---------------------------------------------------------------------------
+# _has_tty — true when a terminal can be prompted (menus read /dev/tty, so
+# `curl | bash` is interactive while CI and cron are not)
+# ---------------------------------------------------------------------------
+_has_tty() {
+  [[ "${KITSYNC_NO_TTY:-}" != 1 ]] && { : </dev/tty; } 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# _config_set <key> <value> — set one key in .kitsync/config, keeping the rest
+# (the file also holds profiles, encryption and the upgrade channel)
+# ---------------------------------------------------------------------------
+_config_set() {
+  local cfg="$CLAUDE_HOME/.kitsync/config" tmp
+  mkdir -p "$(dirname "$cfg")"
+  [[ -f "$cfg" ]] || printf '# claude-kitsync sync preferences\n# Edit manually or run: claude-kitsync settings\n' > "$cfg"
+  tmp="$(mktemp "${cfg}.XXXXXX")"
+  grep -v "^$1=" "$cfg" > "$tmp" || true
+  printf '%s=%s\n' "$1" "$2" >> "$tmp"
+  mv "$tmp" "$cfg"
+}
+
+# ---------------------------------------------------------------------------
 # die — log error and exit
 # ---------------------------------------------------------------------------
 die() {
@@ -136,6 +158,9 @@ _select_menu() {
   local options=("$@")
   local n=${#options[@]}
   local selected=0
+
+  # No terminal: first option (the default)
+  if ! _has_tty; then printf '1'; return 0; fi
 
   # Hide cursor; restore on interrupt
   printf '\033[?25l' >/dev/tty
@@ -222,6 +247,14 @@ _select_multi() {
   # All selected by default
   local sel=()
   for (( i=0; i<n; i++ )); do sel+=("1"); done
+
+  # No terminal: the default (everything)
+  if ! _has_tty; then
+    local all=""
+    for (( i=1; i<=n; i++ )); do all+="$i "; done
+    printf '%s' "${all% }"
+    return 0
+  fi
 
   printf '\033[?25l' >/dev/tty
   trap 'printf "\033[?25h" >/dev/tty' INT TERM
@@ -311,6 +344,8 @@ _read_tty() {
   local prompt="$1"
   local default="${2:-}"
   local reply=""
+
+  if ! _has_tty; then printf '%s' "$default"; return 0; fi
 
   if [[ -n "$default" ]]; then
     printf "  ${_CLR_CYAN}◆${_CLR_RESET}  %s ${_CLR_BOLD}(%s)${_CLR_RESET}: " "$prompt" "$default" >/dev/tty

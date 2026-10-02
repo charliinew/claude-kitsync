@@ -27,6 +27,47 @@ _find_template() {
   fi
 }
 
+# _gitignore_is_allowlist <file> — first rule denies everything
+_gitignore_is_allowlist() {
+  [[ "$(grep -v '^[[:space:]]*\(#\|$\)' "$1" 2>/dev/null | head -1 || true)" == "*" ]]
+}
+
+# ---------------------------------------------------------------------------
+# _init_replace_gitignore <template> — an existing .gitignore that is not an
+# allowlist lets everything else through (conversations, caches): back it up,
+# install the allowlist, and stop tracking what it now excludes.
+# ---------------------------------------------------------------------------
+_init_replace_gitignore() {
+  local template="$1" gi="$CLAUDE_HOME/.gitignore"
+  log_warn "$gi is not an allowlist — anything it does not ignore would be pushed."
+  local choice
+  choice="$(_select_menu "Replace it with kitsync's allowlist?" \
+    "Replace  (recommended — a backup is kept)" \
+    "Keep it  (you manage what gets synced)")"
+  if [[ "$choice" != "1" ]]; then
+    log_warn "Keeping your .gitignore — 'claude-kitsync doctor' will keep flagging it."
+    return 0
+  fi
+
+  local backup_dir="$CLAUDE_HOME/.kitsync/backups"
+  local backup
+  backup="$backup_dir/.gitignore.$(date '+%Y%m%dT%H%M%S').bak"
+  mkdir -p "$backup_dir"
+  cp "$gi" "$backup"
+  cp "$template" "$gi"
+  log_success ".gitignore replaced by the allowlist (backup: $backup)"
+
+  # Files already tracked but now excluded: untrack them (they stay on disk)
+  local excluded
+  excluded="$(git -C "$CLAUDE_HOME" ls-files -ci --exclude-standard 2>/dev/null || true)"
+  if [[ -n "$excluded" ]]; then
+    printf '%s\n' "$excluded" | while IFS= read -r _f; do
+      git -C "$CLAUDE_HOME" rm --cached -q -- "$_f" 2>/dev/null || true
+    done
+    log_info "Stopped tracking $(grep -c . <<< "$excluded") file(s) the allowlist excludes (kept on disk)."
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # _generate_settings_template — replaces absolute paths in settings.json
 # with $HOME/.claude placeholder and writes settings.template.json
@@ -175,7 +216,22 @@ _init_resolve_conflicts() {
 }
 
 # ---------------------------------------------------------------------------
-# _create_repo_via_gh — create a new GitHub repo, return its SSH URL
+# _gh_clone_url <owner/repo> — URL matching the git protocol configured in gh
+# (SSH only if the user chose it; HTTPS pushes go through gh's credential
+# helper). Same helper as install.sh.
+# ---------------------------------------------------------------------------
+_gh_clone_url() {
+  local proto
+  proto="$(gh config get git_protocol -h github.com 2>/dev/null || true)"
+  if [[ "$proto" == "ssh" ]]; then
+    printf 'git@github.com:%s.git' "$1"
+  else
+    printf 'https://github.com/%s.git' "$1"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# _create_repo_via_gh — create a new GitHub repo, return its clone URL
 # ---------------------------------------------------------------------------
 _create_repo_via_gh() {
   local repo_name
@@ -190,7 +246,8 @@ _create_repo_via_gh() {
   if gh repo create "$repo_name" "$vis_flag" --description "Claude Code config sync" >/dev/null 2>&1; then
     local gh_login
     gh_login="$(gh api user -q .login 2>/dev/null)"
-    local result_url="git@github.com:${gh_login}/${repo_name}.git"
+    local result_url
+    result_url="$(_gh_clone_url "${gh_login}/${repo_name}")"
     log_success "Repo created: github.com/${gh_login}/${repo_name}"
     printf '%s' "$result_url"
   else
@@ -200,7 +257,7 @@ _create_repo_via_gh() {
 }
 
 # ---------------------------------------------------------------------------
-# _connect_repo_via_gh — browse existing GitHub repos, return selected SSH URL
+# _connect_repo_via_gh — browse existing GitHub repos, return selected clone URL
 # ---------------------------------------------------------------------------
 _connect_repo_via_gh() {
   log_step "Fetching your GitHub repos..."
@@ -223,7 +280,7 @@ _connect_repo_via_gh() {
   choice="$(_select_menu "Select a repository:" "${options[@]}")"
 
   local selected="${options[$((choice - 1))]}"
-  printf 'git@github.com:%s.git' "$selected"
+  _gh_clone_url "$selected"
 }
 
 # ---------------------------------------------------------------------------
@@ -326,6 +383,22 @@ _prompt_sync_items() {
 # ---------------------------------------------------------------------------
 _prompt_sync_preferences() {
   printf "\n"
+  local cfg="$CLAUDE_HOME/.kitsync/config"
+
+  # Re-run: offer to keep what is there (without a terminal, keep it)
+  if grep -q '^KITSYNC_PULL_MODE=' "$cfg" 2>/dev/null; then
+    local _cur_pull_mode _cur_push_mode
+    _cur_pull_mode="$(grep '^KITSYNC_PULL_MODE=' "$cfg" | cut -d= -f2-)"
+    _cur_push_mode="$(grep '^KITSYNC_PUSH_MODE=' "$cfg" 2>/dev/null | cut -d= -f2- || true)"
+    local keep
+    keep="$(_select_menu "Sync preferences already set (pull: ${_cur_pull_mode}, push: ${_cur_push_mode:-?})" \
+      "Keep them" \
+      "Change them")"
+    if [[ "$keep" == "1" ]]; then
+      log_info "Keeping current sync preferences."
+      return 0
+    fi
+  fi
 
   # --- Pull mode ---
   local pull_choice
@@ -359,7 +432,6 @@ _prompt_sync_preferences() {
   esac
 
   # --- Sync items (which categories to push / pull) ---
-  local cfg="$CLAUDE_HOME/.kitsync/config"
   local _cur_push _cur_pull
   _cur_push="$(grep '^KITSYNC_PUSH_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2- || true)"
   _cur_pull="$(grep '^KITSYNC_PULL_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2- || true)"
@@ -370,17 +442,12 @@ _prompt_sync_preferences() {
   local pull_items
   pull_items="$(_prompt_sync_items "pull" "$_cur_pull")"
 
-  # Write config
-  mkdir -p "$CLAUDE_HOME/.kitsync"
-  cat > "$CLAUDE_HOME/.kitsync/config" <<CONFIG
-# claude-kitsync sync preferences
-# Edit manually or run: claude-kitsync settings
-KITSYNC_PULL_MODE=${pull_mode}
-KITSYNC_PUSH_MODE=${push_mode}
-KITSYNC_PUSH_TIMER=${push_timer}
-KITSYNC_PUSH_ITEMS=${push_items}
-KITSYNC_PULL_ITEMS=${pull_items}
-CONFIG
+  # Only these keys: the same file holds profiles, encryption, upgrade channel
+  _config_set KITSYNC_PULL_MODE "$pull_mode"
+  _config_set KITSYNC_PUSH_MODE "$push_mode"
+  _config_set KITSYNC_PUSH_TIMER "$push_timer"
+  _config_set KITSYNC_PUSH_ITEMS "$push_items"
+  _config_set KITSYNC_PULL_ITEMS "$pull_items"
 
   log_success "Sync preferences saved."
 }
@@ -445,9 +512,10 @@ cmd_init() {
   template_path="$(_find_template)"
 
   if [[ -n "$template_path" ]] && [[ -f "$template_path" ]]; then
-    if [[ -f "$gitignore_dest" ]]; then
-      log_warn ".gitignore already exists in $CLAUDE_HOME — keeping existing file."
-      log_warn "To reset, delete it and run: claude-kitsync init"
+    if [[ -f "$gitignore_dest" ]] && ! _gitignore_is_allowlist "$gitignore_dest"; then
+      _init_replace_gitignore "$template_path"
+    elif [[ -f "$gitignore_dest" ]]; then
+      log_info ".gitignore already set up (allowlist) — kept."
     else
       log_step "Installing .gitignore from template..."
       cp "$template_path" "$gitignore_dest"
@@ -570,7 +638,11 @@ GITIGNORE
         _ki=$(( _ki + 1 ))
       done
 
-      if [[ ${#_kit_items[@]} -gt 0 ]]; then
+      # Without a terminal, menus fall back to "everything": import nothing
+      # instead of pushing someone else's config into this user's remote
+      if [[ ${#_kit_items[@]} -gt 0 ]] && ! _has_tty; then
+        log_info "No terminal — starter config not imported (run 'claude-kitsync install' later)."
+      elif [[ ${#_kit_items[@]} -gt 0 ]]; then
         printf "\n"
         local _kit_selected
         _kit_selected="$(_select_multi "Import claude-kitsync starter config?" "${_kit_labels[@]}")"
@@ -666,7 +738,8 @@ GITIGNORE
      git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null 2>&1; then
     local _existing_profiles _profile_default _init_profile_name _init_remote_url
     _existing_profiles="$(_profile_list_names 2>/dev/null || true)"
-    _profile_default="default"
+    _profile_default="$(_profile_get_active 2>/dev/null || true)"
+    [[ -n "$_profile_default" ]] || _profile_default="default"
 
     if [[ -n "$_existing_profiles" ]]; then
       log_info "Existing profiles: $(printf '%s' "$_existing_profiles" | tr '\n' ' ')"
@@ -707,25 +780,28 @@ GITIGNORE
 
     if [[ "$do_push" == true ]]; then
       log_step "Pushing to origin main..."
-      local _push_ok=false
-      if git -C "$CLAUDE_HOME" push -q -u origin main 2>/dev/null; then
+      local _push_ok=false _push_err=""
+      if _push_err="$(git -C "$CLAUDE_HOME" push -q -u origin HEAD:main 2>&1)"; then
         _push_ok=true
-      elif git -C "$CLAUDE_HOME" push -q -u origin HEAD 2>/dev/null; then
-        _push_ok=true
-      fi
-
-      if [[ "$_push_ok" == false ]]; then
-        # Remote has existing commits (connect mode) — rebase local on top of remote history.
+      else
+        # Remote has its own history (connect mode): replay the local commit on
+        # top of it. In a rebase "theirs" is the commit being replayed, so the
+        # REMOTE/LOCAL choices made above win over the remote's content.
         log_step "Remote has existing commits — rebasing on top..."
-        if git -C "$CLAUDE_HOME" pull --rebase --allow-unrelated-histories -X ours -q 2>/dev/null; then
-          git -C "$CLAUDE_HOME" push -q 2>/dev/null && _push_ok=true
+        if _push_err="$(git -C "$CLAUDE_HOME" pull --rebase --allow-unrelated-histories \
+                          -X theirs -q origin main 2>&1)" && \
+           _push_err="$(git -C "$CLAUDE_HOME" push -q -u origin HEAD:main 2>&1)"; then
+          _push_ok=true
+        else
+          git -C "$CLAUDE_HOME" rebase --abort 2>/dev/null || true
         fi
       fi
 
       if [[ "$_push_ok" == true ]]; then
         log_success "Pushed to remote."
       else
-        log_warn "Push failed — your commit is local only."
+        log_warn "Push failed — your commit is local only:"
+        [[ -n "$_push_err" ]] && printf '%s\n' "$_push_err" | head -5 | sed 's/^/      /' >&2
         log_warn "Run 'claude-kitsync push' to retry, or check your remote credentials."
       fi
     else
