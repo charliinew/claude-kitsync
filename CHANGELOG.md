@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.11] — 2026-10-02
+
+### Changed
+- **`doctor` checks that sync actually works**, in four sections:
+  - **Config repo**: the remote is reachable, not just configured. This is a 15 s check that never prompts, and it shows git's error.
+  - **Sync**: unpushed or unpulled commits, a rebase or merge stuck in progress, a pending conflict, each with the command that fixes it.
+  - **Data safety**: the `.gitignore` is still the allowlist, no excluded file is tracked (e.g. `projects/` conversations), `settings.json` is not tracked in plaintext when encryption is on, and the portable paths filter is active.
+  - **Installation**: version and available update, several installs on PATH, `gpg` missing, wrapper.
+- Check numbering was inconsistent ([1/6] … [5/7]); checks are now grouped by section.
+
+### Fixed
+- **The PATH line stacked `~/.local/bin` again every time the rc file was sourced** (which kitsync asks you to do after a wrapper update). It is now idempotent; existing installs are migrated automatically.
+- **Running a dev checkout's CLI could point your rc completion block at that checkout.** Only the installer's own clone now rewrites it.
+
 ## [1.1.10] — 2026-10-02
 
 ### Fixed
