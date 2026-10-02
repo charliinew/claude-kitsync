@@ -96,7 +96,7 @@ run_test_uni_rc_in_place() {
   assert_eq "0" "$(grep -c 'kitsync' "$h/dotfiles/zshrc")" "UNI: blocks removed through the symlink"
   assert_eq "1" "$(grep -c '^source ~/.private_env$' "$h/dotfiles/zshrc")" \
     "UNI: line after a stale PATH marker is kept unless it is the export"
-  assert_eq "644" "$(stat -f '%Lp' "$h/dotfiles/zshrc" 2>/dev/null || stat -c '%a' "$h/dotfiles/zshrc")" \
+  assert_eq "644" "$(stat -c '%a' "$h/dotfiles/zshrc" 2>/dev/null || stat -f '%Lp' "$h/dotfiles/zshrc")" \
     "UNI: rc permissions kept"
   assert_nonzero "$(ls -A "$h/.claude/.kitsync/backups/" 2>/dev/null | wc -l | tr -d ' ')" \
     "UNI: rc backed up before edits"
