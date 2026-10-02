@@ -42,6 +42,7 @@ source "$_RUNNER_DIR/test_wrapper.sh"
 source "$_RUNNER_DIR/test_regressions.sh"
 source "$_RUNNER_DIR/test_upgrade.sh"
 source "$_RUNNER_DIR/test_uninstall.sh"
+source "$_RUNNER_DIR/test_doctor.sh"
 
 # Some sourced lib files (lib/core.sh, lib/wrapper.sh) call set -euo pipefail,
 # which activates -e in this shell. Re-disable it — the runner intentionally
@@ -68,6 +69,7 @@ case "$_FILTER" in
     run_regressions_tests
     run_upgrade_tests
     run_uninstall_tests
+    run_doctor_tests
     ;;
   gitignore)
     run_gitignore_tests
@@ -96,8 +98,11 @@ case "$_FILTER" in
   uninstall)
     run_uninstall_tests
     ;;
+  doctor)
+    run_doctor_tests
+    ;;
   *)
-    printf "Unknown filter '%s'. Valid: all, gitignore, paths, sync, install, idempotent, wrapper, regressions, upgrade, uninstall\n" "$_FILTER" >&2
+    printf "Unknown filter '%s'. Valid: all, gitignore, paths, sync, install, idempotent, wrapper, regressions, upgrade, uninstall, doctor\n" "$_FILTER" >&2
     exit 1
     ;;
 esac

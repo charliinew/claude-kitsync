@@ -54,7 +54,9 @@ run_test_upg_changelog_since() {
 run_test_upg_refresh_shell_setup() {
   local h rc want before after out
   h="$(mktemp -d)"
-  mkdir -p "$h/.claude/.kitsync"
+  mkdir -p "$h/.claude/.kitsync" "$h/.local/share"
+  # The installer's clone location (refresh only rewires completion for it)
+  ln -s "$_PROJECT_ROOT" "$h/.local/share/kitsync"
   rc="$h/.zshrc"
   # A script install from an older version: stale wrapper and completion path
   {
@@ -84,11 +86,31 @@ run_test_upg_refresh_shell_setup() {
   assert_eq "0" "$(grep -c '/old/kitsync' "$rc")" "UPG: stale completion path removed"
   assert_eq "1" "$(grep -c '^alias ll=' "$rc")" "UPG: refresh keeps the rest of the rc file"
 
+  # PATH line migrated to the idempotent form: sourcing twice adds the dir once
+  local pline
+  pline="$(grep -A1 '^# claude-kitsync PATH$' "$rc" | tail -1)"
+  assert_contains "$pline" 'case ":$PATH:" in' "UPG: old PATH line migrated"
+  assert_eq "1" "$(PATH=/usr/bin:/bin bash -c "$pline; $pline; echo \"\$PATH\"" | tr ':' '\n' | grep -c "^$h/.local/bin$")" \
+    "UPG: migrated PATH line is idempotent"
+
   before="$(cat "$rc")"
   out="$(_upg_run "$h" refresh_shell_setup 2>&1)"
   after="$(cat "$rc")"
   assert_eq "$before" "$after" "UPG: refresh is a no-op when up to date"
   assert_eq "" "$out" "UPG: no output when nothing changed"
+
+  # A dev checkout run by hand must not rewire the completion block
+  local before_dev
+  before_dev="$(cat "$rc")"
+  sed -i.bak "s|$_PROJECT_ROOT/completions|/elsewhere/completions|" "$rc" && rm -f "$rc.bak"
+  _UPG_KS_ROOT="$(mktemp -d)" _upg_run "$h" refresh_shell_setup >/dev/null 2>&1
+  assert_contains "$(cat "$rc")" "/elsewhere/completions" \
+    "UPG: refresh from a non-installer dir leaves completion alone"
+  printf '%s\n' "$before_dev" > "$rc"
+
+  # Uninstall removes the new PATH form too
+  _upg_run "$h" _remove_path_from_rc "$rc" >/dev/null 2>&1
+  assert_eq "0" "$(grep -c 'kitsync PATH\|case ":\$PATH:"' "$rc")" "UPG: idempotent PATH line removable"
 
   # bashrc without kitsync blocks (e.g. Homebrew install, zsh user) is left alone
   printf 'export X=1\n' > "$h/.bashrc"

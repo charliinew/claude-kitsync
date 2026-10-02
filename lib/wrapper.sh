@@ -455,7 +455,7 @@ _remove_path_from_rc() {
   # Remove the marker line and the export PATH line that follows it — only if
   # it still is one (a user-edited rc must not lose an unrelated line)
   awk '/^# kitsync PATH$|^# claude-kitsync PATH$/{skip=1; next}
-       skip { skip=0; if ($0 ~ /^export PATH=/) next }
+       skip { skip=0; if ($0 ~ /^export PATH=/ || $0 ~ /^case ":\$PATH:" in /) next }
        {print}' "$rc_file" > "$tmp_file"
   _rc_write "$tmp_file" "$rc_file"
   log_info "Removed PATH entry from $rc_file"
@@ -482,9 +482,44 @@ _completion_block() {
   printf '# claude-kitsync completion end\n'
 }
 
+# _path_line <dir> — the idempotent PATH line install.sh writes
+_path_line() {
+  # shellcheck disable=SC2016
+  printf 'case ":$PATH:" in *":%s:"*) ;; *) export PATH="%s:$PATH" ;; esac\n' "$1" "$1"
+}
+
+# _migrate_path_line <rc> — older installers wrote `export PATH="<dir>:$PATH"`,
+# which stacks <dir> again each time the rc is sourced
+_migrate_path_line() {
+  local rc="$1" dir
+  dir="$(awk '/^# (claude-)?kitsync PATH$/ { getline; print; exit }' "$rc" |
+         sed -n 's|^export PATH="\(.*\):\$PATH"$|\1|p')"
+  [[ -n "$dir" ]] || return 0
+  _backup_rc "$rc"
+  local tmp new
+  tmp="$(mktemp)"
+  new="$(_path_line "$dir")"
+  awk -v new="$new" '/^# (claude-)?kitsync PATH$/ { print; getline; print new; next } { print }' \
+    "$rc" > "$tmp"
+  _rc_write "$tmp" "$rc"
+  log_success "PATH entry made idempotent in $rc"
+}
+
 # _rc_block <rc_file> <start_line> <end_line> — print a block, markers included
 _rc_block() {
   awk -v s="$2" -v e="$3" '$0 == s {on=1} on {print} on && $0 == e {exit}' "$1"
+}
+
+# ---------------------------------------------------------------------------
+# _managed_install_dir — true when KITSYNC_ROOT is the installer's own clone.
+# A dev checkout or a KITSYNC_INSTALL_DIR install is someone's working copy:
+# uninstall must never delete it, nor point the rc file at it.
+# ---------------------------------------------------------------------------
+_managed_install_dir() {
+  local root managed
+  root="$(cd "$KITSYNC_ROOT" 2>/dev/null && pwd -P)" || return 1
+  managed="$(cd "$HOME/.local/share/kitsync" 2>/dev/null && pwd -P)" || return 1
+  [[ "$root" == "$managed" ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -506,7 +541,11 @@ refresh_shell_setup() {
       log_success "Shell wrapper updated in $rc"
     fi
 
-    # Completion: script installs only (Homebrew installs its own)
+    grep -qF "kitsync PATH" "$rc" 2>/dev/null && _migrate_path_line "$rc"
+
+    # Completion: the installer's clone only (Homebrew installs its own, and a
+    # dev checkout run by hand must not take over the user's rc file)
+    _managed_install_dir || continue
     grep -qF "kitsync PATH" "$rc" 2>/dev/null || continue
     [[ -d "$KITSYNC_ROOT/completions" ]] || continue
     case "$rc" in

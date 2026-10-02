@@ -373,7 +373,11 @@ if [[ -n "$rc_file" ]]; then
   touch "$rc_file"
   if ! grep -qF "claude-kitsync PATH" "$rc_file" 2>/dev/null && \
      ! grep -qF "kitsync PATH" "$rc_file" 2>/dev/null; then
-    printf '\n# claude-kitsync PATH\nexport PATH="%s:$PATH"\n' "$bin_dir" >> "$rc_file"
+    # Idempotent: re-sourcing the rc must not stack the dir (one line, kept in
+    # sync with _path_line in lib/wrapper.sh)
+    # shellcheck disable=SC2016
+    printf '\n# claude-kitsync PATH\ncase ":$PATH:" in *":%s:"*) ;; *) export PATH="%s:$PATH" ;; esac\n' \
+      "$bin_dir" "$bin_dir" >> "$rc_file"
   fi
 fi
 
