@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.14] — 2026-10-03
+
+### Added
+- **`claude-kitsync setup-kit`** wires the starter kit's hook and scripts into `settings.json` (backup first, idempotent, never replaces your own status line); `--print` shows the snippet instead. `init` offers it right after importing `hooks/` or `scripts/` — before, they were copied but never run.
+
+### Fixed
+- **Starter kit `rm_to_trash.py` rewrote any `rm`**, e.g. `git rm --cached` → `git trash --cached`. It now only rewrites `rm` used as a command (also after `sudo`/`xargs`, `\rm`, `/bin/rm`), keeps the rest of the tool input, and works on Linux: `trash`, `trash-put` or `gio trash`, whichever exists. With none installed, Claude's `rm` is blocked with install instructions — never run for real.
+- Starter kit `CLAUDE.md` pointed to a `/push` skill the kit does not ship.
+
+### Changed
+- Starter kit `scripts/` trimmed to what runs (no tests, fixtures, lockfile, lint config or dev notes); `package.json` lists only the dependency actually used. Status line, `apex` (isolated-agent flow with `-s`) and `commit` skills updated to their current versions.
+- The starter kit import menu starts with nothing selected, and says what `hooks/` and `scripts/` need.
+
 ## [1.1.13] — 2026-10-03
 
 ### Fixed
