@@ -81,6 +81,25 @@ paths_detokenize_stream() {
   sed -e "$(_paths_sed_program smudge | tr '\n' ';')"
 }
 
+# _paths_commit_tokenized_head <file> — commit HEAD's <file> with its paths
+# tokenized, through a temporary index (the real index and working tree keep
+# any pending edit)
+_paths_commit_tokenized_head() {
+  local f="$1" mode sha tree commit idx rc=0
+  mode="$(git -C "$CLAUDE_HOME" ls-tree HEAD -- "$f" | awk '{print $1}')"
+  sha="$(git -C "$CLAUDE_HOME" show "HEAD:$f" | paths_tokenize_stream | git -C "$CLAUDE_HOME" hash-object -w --stdin)" || return 1
+  idx="$(mktemp)"
+  GIT_INDEX_FILE="$idx" git -C "$CLAUDE_HOME" read-tree HEAD &&
+    GIT_INDEX_FILE="$idx" git -C "$CLAUDE_HOME" update-index --cacheinfo "$mode,$sha,$f" &&
+    tree="$(GIT_INDEX_FILE="$idx" git -C "$CLAUDE_HOME" write-tree)" &&
+    commit="$(git -C "$CLAUDE_HOME" commit-tree "$tree" -p HEAD -m "kitsync: portable path tokens in $f")" &&
+    git -C "$CLAUDE_HOME" update-ref HEAD "$commit" || rc=1
+  rm -f "$idx"
+  # The index entry still holds the old blob: point it at the new HEAD
+  [[ $rc -eq 0 ]] && git -C "$CLAUDE_HOME" reset -q -- "$f" 2>/dev/null
+  return $rc
+}
+
 # ---------------------------------------------------------------------------
 # paths_filter_setup — idempotently register the clean/smudge filter in the
 # repo's .git/config and bind it to settings.json in .git/info/attributes.
@@ -109,13 +128,12 @@ paths_filter_setup() {
     grep -qxF "$line" "$attrs" 2>/dev/null || printf '%s\n' "$line" >> "$attrs"
 
     # Migration: a file committed with absolute paths now differs from its
-    # cleaned form and would look modified forever (blocking even
-    # `pull --autostash`). Commit the tokenized version once.
+    # cleaned form and would look modified forever. Commit the tokenized
+    # version of the COMMITTED file once — never the working-tree edits, which
+    # go through push (its selection and its broken-file checks).
     git -C "$CLAUDE_HOME" ls-files --error-unmatch -- "$f" &>/dev/null || continue
-    git -C "$CLAUDE_HOME" add --renormalize -- "$f" 2>/dev/null || continue
-    if ! git -C "$CLAUDE_HOME" diff --cached --quiet -- "$f" 2>/dev/null; then
-      git -C "$CLAUDE_HOME" commit -q -m "kitsync: portable path tokens in $f" -- "$f" 2>/dev/null || true
-    fi
+    git -C "$CLAUDE_HOME" show "HEAD:$f" 2>/dev/null | grep -qF "$HOME" || continue
+    _paths_commit_tokenized_head "$f" || true
   done
 }
 

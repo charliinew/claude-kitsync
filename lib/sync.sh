@@ -62,6 +62,7 @@ _gitignore_migrate() {
     ".kitsync/encryption.key*"
     ".kitsync/pending-notice"
     ".kitsync/conflict_pending"
+    ".kitsync/sync-warning"
     ".kitsync/*.tmp.*"
     "skills/synced/"
   )
@@ -98,6 +99,15 @@ _gitignore_migrate() {
 _sync_prepare_repo() {
   paths_filter_setup 2>/dev/null || true
   _gitignore_migrate 2>/dev/null || true
+  # Setups made before 1.1.15 committed .kitsync/config only on the first
+  # push: another machine's pull then fails ("untracked working tree files
+  # would be overwritten"). Track it before any rebase.
+  if [[ -f "$CLAUDE_HOME/.kitsync/config" ]] && \
+     ! git -C "$CLAUDE_HOME" ls-files --error-unmatch .kitsync/config &>/dev/null && \
+     git -C "$CLAUDE_HOME" rev-parse -q --verify HEAD >/dev/null; then
+    git -C "$CLAUDE_HOME" add -- .kitsync/config 2>/dev/null && \
+      git -C "$CLAUDE_HOME" commit -q -m "kitsync: track sync preferences" -- .kitsync/config 2>/dev/null || true
+  fi
   if _crypto_is_enabled 2>/dev/null; then
     _crypto_gitignore_block add 2>/dev/null || true
     git -C "$CLAUDE_HOME" rm --cached -q --ignore-unmatch \
@@ -140,6 +150,84 @@ _sync_item_in_list() {
 _is_dirty() {
   # Untracked files never block a rebase — only tracked changes count
   [[ -n "$(git -C "$CLAUDE_HOME" status --porcelain --untracked-files=no 2>/dev/null)" ]]
+}
+
+# ---------------------------------------------------------------------------
+# Per-machine sync lock (inside .git/, never synced): two terminals, or a pull
+# and an end-of-session push, must not run git on ~/.claude at the same time.
+# ---------------------------------------------------------------------------
+_SYNC_LOCKED=""
+
+# _sync_lock <wait_seconds> — take the lock; 1 if still held by a live process
+_sync_lock() {
+  [[ -n "$_SYNC_LOCKED" ]] && return 0   # re-entrant (pull → push)
+  local dir pid waited=0
+  dir="$(git -C "$CLAUDE_HOME" rev-parse --absolute-git-dir 2>/dev/null)/kitsync.lock"
+  while ! mkdir "$dir" 2>/dev/null; do
+    pid="$(cat "$dir/pid" 2>/dev/null || true)"
+    # Stale: holder gone, or crashed before writing its pid
+    if { [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; } || \
+       { [[ -z "$pid" ]] && [[ -n "$(find "$dir" -maxdepth 0 -mmin +1 2>/dev/null)" ]]; }; then
+      rm -f "$dir/pid"; rmdir "$dir" 2>/dev/null || true
+      continue
+    fi
+    (( waited >= $1 )) && return 1
+    sleep 1
+    waited=$(( waited + 1 ))
+  done
+  printf '%s\n' "$$" > "$dir/pid"
+  _SYNC_LOCKED="$dir"
+  trap '_sync_unlock' EXIT
+}
+
+_sync_unlock() {
+  [[ -n "$_SYNC_LOCKED" ]] || return 0
+  rm -f "$_SYNC_LOCKED/pid"
+  rmdir "$_SYNC_LOCKED" 2>/dev/null || true
+  _SYNC_LOCKED=""
+}
+
+# _sync_warn_next_launch <msg> — shown by the claude() wrapper next time
+# (background syncs have no terminal to warn on)
+_sync_warn_next_launch() {
+  mkdir -p "$CLAUDE_HOME/.kitsync" 2>/dev/null || true
+  printf '%s\n' "$1" > "$CLAUDE_HOME/.kitsync/sync-warning" 2>/dev/null || true
+}
+
+# _markers <cmd...> — number of conflict-marker lines in the command's output
+_markers() {
+  "$@" 2>/dev/null | grep -cE '^(<<<<<<<|>>>>>>>)( |$)' || true
+}
+
+# ---------------------------------------------------------------------------
+# _sync_unstage_broken — never commit a half-merged file: conflict markers that
+# the committed version did not have (docs may show markers on purpose), or a
+# settings.json that is not valid JSON. Those files are unstaged with a
+# warning; everything else is still pushed.
+# ---------------------------------------------------------------------------
+_sync_unstage_broken() {
+  local f bad=""
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    if (( $(_markers git -C "$CLAUDE_HOME" show ":$f") > $(_markers git -C "$CLAUDE_HOME" show "HEAD:$f") )); then
+      bad="$bad $f"
+    fi
+  done < <(git -C "$CLAUDE_HOME" diff --cached --name-only --diff-filter=AM 2>/dev/null)
+
+  # settings.json is checked on disk: under encryption only its .enc is staged
+  if [[ -f "$CLAUDE_HOME/settings.json" ]] && command -v python3 &>/dev/null && \
+     ! python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$CLAUDE_HOME/settings.json" 2>/dev/null; then
+    for f in settings.json settings.json.enc; do
+      git -C "$CLAUDE_HOME" diff --cached --quiet -- "$f" 2>/dev/null || bad="$bad $f"
+    done
+  fi
+
+  [[ -n "$bad" ]] || return 0
+  for f in $bad; do
+    git -C "$CLAUDE_HOME" reset -q -- "$f" 2>/dev/null || true
+  done
+  log_warn "Not pushed — unresolved merge or invalid JSON in:$bad"
+  _sync_warn_next_launch "Not pushed — fix these files, then run claude-kitsync push:$bad"
 }
 
 # ---------------------------------------------------------------------------
@@ -198,9 +286,16 @@ _prompt_conflict_resolution() {
 #   4. Decrypt, then normalise paths after successful pull
 # ---------------------------------------------------------------------------
 sync_pull() {
-  local force="${1:-}"
+  local force=""
+  case "${1:-}" in
+    --auto)  _sync_pull_auto; return 0 ;;
+    --force) force="--force" ;;
+    "")      ;;
+    *)       die "Unknown option: $1 (usage: claude-kitsync pull [--force])" ;;
+  esac
 
   require_git_repo
+  _sync_lock 30 || die "Another kitsync sync is running on this machine — try again in a moment."
   _sync_prepare_repo
 
   if ! _has_remote; then
@@ -264,29 +359,7 @@ sync_pull() {
   if _pull_out="$(git -C "$CLAUDE_HOME" pull --rebase --autostash --allow-unrelated-histories -X ours 2>&1)"; then
     log_success "Pull complete."
 
-    # Selective pull: restore categories not in user's pull selection
-    local _pull_items
-    _pull_items="$(_sync_get_pull_items)"
-    if [[ -n "$_pre_pull_sha" ]]; then
-      for _pull_cat in "${SYNC_USER_CATEGORIES[@]}"; do
-        if ! _sync_item_in_list "$_pull_cat" "$_pull_items"; then
-          local _pull_path
-          _pull_path="$(_sync_category_to_path "$_pull_cat")"
-          if [[ -e "$CLAUDE_HOME/$_pull_path" ]] && \
-             ! git -C "$CLAUDE_HOME" diff --quiet "$_pre_pull_sha" HEAD -- "$_pull_path" 2>/dev/null; then
-            # Restore working tree + index to pre-pull version, then unstage
-            git -C "$CLAUDE_HOME" checkout "$_pre_pull_sha" -- "$_pull_path" 2>/dev/null || true
-            git -C "$CLAUDE_HOME" reset HEAD -- "$_pull_path" 2>/dev/null || true
-            log_info "Selective pull: kept local ${_pull_cat} (not in pull selection)"
-          fi
-        fi
-      done
-    fi
-
-    # Step 4: decrypt encrypted files (if enabled), then normalise absolute paths
-    crypto_decrypt_all 2>/dev/null || true
-    normalize_paths
-    paths_detokenize
+    _sync_after_pull "$_pre_pull_sha"
   else
     # Step 3: show conflict details, abort rebase, offer interactive resolution
     log_warn "Pull/rebase failed — checking for conflicts..."
@@ -312,6 +385,77 @@ sync_pull() {
     _prompt_conflict_resolution "$_branch"
     return $?
   fi
+}
+
+# ---------------------------------------------------------------------------
+# _sync_after_pull <pre_sha> [quiet] — selective pull, decryption and paths,
+# shared by pull and pull --auto
+# ---------------------------------------------------------------------------
+_sync_after_pull() {
+  local pre="$1" quiet="${2:-}" items cat path
+  items="$(_sync_get_pull_items)"
+  if [[ -n "$pre" ]]; then
+    for cat in "${SYNC_USER_CATEGORIES[@]}"; do
+      _sync_item_in_list "$cat" "$items" && continue
+      path="$(_sync_category_to_path "$cat")"
+      if [[ -e "$CLAUDE_HOME/$path" ]] && \
+         ! git -C "$CLAUDE_HOME" diff --quiet "$pre" HEAD -- "$path" 2>/dev/null; then
+        # Restore working tree + index to pre-pull version, then unstage
+        git -C "$CLAUDE_HOME" checkout "$pre" -- "$path" 2>/dev/null || true
+        git -C "$CLAUDE_HOME" reset -q HEAD -- "$path" 2>/dev/null || true
+        [[ -n "$quiet" ]] || log_info "Selective pull: kept local ${cat} (not in pull selection)"
+      fi
+    done
+  fi
+  crypto_decrypt_all 2>/dev/null || true
+  normalize_paths 2>/dev/null || true
+  paths_detokenize 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
+# _sync_pull_auto — background pull run by the claude() wrapper. Never asks,
+# never prints, never touches local changes:
+#   - skips when busy (lock), dirty (uncommitted edits stay as they are —
+#     no autostash, which leaves conflict markers in files) or mid-rebase
+#   - only the download has a timeout; the local rebase is never interrupted
+#   - same rules as pull: remote wins, selective pull, decryption, paths
+#   - a real conflict is recorded in .kitsync/conflict_pending; new commits
+#     leave .kitsync/pending-notice for the next launch
+# ---------------------------------------------------------------------------
+_sync_pull_auto() {
+  [[ -d "$CLAUDE_HOME/.git" ]] && _has_remote || return 0
+  _sync_lock 0 || return 0
+  local gd
+  gd="$(git -C "$CLAUDE_HOME" rev-parse --absolute-git-dir 2>/dev/null)"
+  [[ -d "$gd/rebase-merge" || -d "$gd/rebase-apply" || -f "$gd/MERGE_HEAD" ]] && return 0
+  _is_dirty && return 0
+
+  local branch pre
+  branch="$(git -C "$CLAUDE_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+  KITSYNC_NET_TIMEOUT="${KITSYNC_TIMEOUT:-10}" _git_net fetch -q origin "$branch" &>/dev/null || return 0
+  git -C "$CLAUDE_HOME" rev-parse --verify -q "origin/$branch" >/dev/null || return 0
+  git -C "$CLAUDE_HOME" rev-parse --abbrev-ref '@{u}' &>/dev/null || \
+    git -C "$CLAUDE_HOME" branch -q --set-upstream-to="origin/$branch" "$branch" 2>/dev/null || true
+
+  _sync_prepare_repo
+  pre="$(git -C "$CLAUDE_HOME" rev-parse HEAD 2>/dev/null || true)"
+  # -X ours = remote wins (a rebase swaps sides)
+  if git -C "$CLAUDE_HOME" rebase -q -X ours "origin/$branch" &>/dev/null; then
+    rm -f "$CLAUDE_HOME/.kitsync/conflict_pending" 2>/dev/null || true
+    if [[ "$pre" != "$(git -C "$CLAUDE_HOME" rev-parse HEAD 2>/dev/null)" ]]; then
+      _sync_after_pull "$pre" quiet
+      printf 'updated\n' > "$CLAUDE_HOME/.kitsync/pending-notice" 2>/dev/null || true
+    fi
+    return 0
+  fi
+
+  local files
+  files="$(git -C "$CLAUDE_HOME" diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ',' | sed 's/,$//')"
+  git -C "$CLAUDE_HOME" rebase --abort 2>/dev/null || true   # our own rebase (lock held)
+  if [[ -n "$files" ]]; then
+    printf 'files:%s\n' "$files" > "$CLAUDE_HOME/.kitsync/conflict_pending" 2>/dev/null || true
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -342,6 +486,12 @@ sync_push() {
 
   if ! _has_remote; then
     die "No remote configured. Run: git -C \"$CLAUDE_HOME\" remote add origin <url>"
+  fi
+
+  # Background pushes wait for a running pull; a human gets a clear message
+  if ! _sync_lock "$([[ "$_auto" == true ]] && echo 120 || echo 30)"; then
+    [[ "$_auto" == true ]] && return 0
+    die "Another kitsync sync is running on this machine — try again in a moment."
   fi
 
   # Safety check: ensure .credentials.json is not staged or tracked
@@ -462,6 +612,8 @@ sync_push() {
     git -C "$CLAUDE_HOME" reset HEAD ".credentials.json" 2>/dev/null || true
     exit 1
   fi
+
+  _sync_unstage_broken
 
   # Check if there is anything to commit — local commits not yet pushed
   # (earlier failed push, path-token migration) still need to go out

@@ -40,6 +40,7 @@
 .kitsync/encryption.key*
 .kitsync/pending-notice
 .kitsync/conflict_pending
+.kitsync/sync-warning
 .kitsync/*.tmp.*
 
 # JAMAIS syncé (explicite) — these override the !*/ rule above

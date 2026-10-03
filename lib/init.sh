@@ -691,6 +691,45 @@ GITIGNORE
   fi
 
   # ---------------------------------------------------------------------------
+  # Step 4.7: Sync preferences
+  # Before the initial commit: .kitsync/config must be in it, or the first
+  # pull on another machine fails on an untracked .kitsync/config
+  # ---------------------------------------------------------------------------
+  _prompt_sync_preferences
+
+  # ---------------------------------------------------------------------------
+  # Step 4.8: Profile naming
+  # Always offered when a remote was configured. Default is "default" when no
+  # profiles exist yet; naming is required when profiles already exist so the
+  # active profile stays consistent.
+  # ---------------------------------------------------------------------------
+  if [[ "${_INIT_REMOTE_MODE:-none}" != "none" ]] && \
+     git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null 2>&1; then
+    local _existing_profiles _profile_default _init_profile_name _init_remote_url
+    _existing_profiles="$(_profile_list_names 2>/dev/null || true)"
+    _profile_default="$(_profile_get_active 2>/dev/null || true)"
+    [[ -n "$_profile_default" ]] || _profile_default="default"
+
+    if [[ -n "$_existing_profiles" ]]; then
+      log_info "Existing profiles: $(printf '%s' "$_existing_profiles" | tr '\n' ' ')"
+      log_info "You must name this remote to keep profiles consistent."
+    fi
+
+    while true; do
+      _init_profile_name="$(_read_tty "Profile name for this remote" "$_profile_default")"
+      [[ -z "$_init_profile_name" ]] && _init_profile_name="$_profile_default"
+      if [[ "$_init_profile_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        break
+      fi
+      log_warn "Invalid name — only letters, digits, hyphens, underscores allowed."
+    done
+
+    _init_remote_url="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || true)"
+    _profile_rewrite_config "$_init_profile_name" "$_init_profile_name" "$_init_remote_url"
+    log_success "Profile '$_init_profile_name' registered."
+  fi
+
+  # ---------------------------------------------------------------------------
   # Step 5: Initial commit
   # ---------------------------------------------------------------------------
   log_step "Staging whitelisted files for initial commit..."
@@ -740,43 +779,6 @@ GITIGNORE
     log_success "Initial commit created."
   else
     log_info "Nothing staged for initial commit."
-  fi
-
-  # ---------------------------------------------------------------------------
-  # Step 5.5: Sync preferences
-  # ---------------------------------------------------------------------------
-  _prompt_sync_preferences
-
-  # ---------------------------------------------------------------------------
-  # Step 5.7: Profile naming
-  # Always offered when a remote was configured. Default is "default" when no
-  # profiles exist yet; naming is required when profiles already exist so the
-  # active profile stays consistent.
-  # ---------------------------------------------------------------------------
-  if [[ "${_INIT_REMOTE_MODE:-none}" != "none" ]] && \
-     git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null 2>&1; then
-    local _existing_profiles _profile_default _init_profile_name _init_remote_url
-    _existing_profiles="$(_profile_list_names 2>/dev/null || true)"
-    _profile_default="$(_profile_get_active 2>/dev/null || true)"
-    [[ -n "$_profile_default" ]] || _profile_default="default"
-
-    if [[ -n "$_existing_profiles" ]]; then
-      log_info "Existing profiles: $(printf '%s' "$_existing_profiles" | tr '\n' ' ')"
-      log_info "You must name this remote to keep profiles consistent."
-    fi
-
-    while true; do
-      _init_profile_name="$(_read_tty "Profile name for this remote" "$_profile_default")"
-      [[ -z "$_init_profile_name" ]] && _init_profile_name="$_profile_default"
-      if [[ "$_init_profile_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-        break
-      fi
-      log_warn "Invalid name — only letters, digits, hyphens, underscores allowed."
-    done
-
-    _init_remote_url="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || true)"
-    _profile_rewrite_config "$_init_profile_name" "$_init_profile_name" "$_init_remote_url"
-    log_success "Profile '$_init_profile_name' registered."
   fi
 
   # ---------------------------------------------------------------------------

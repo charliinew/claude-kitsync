@@ -87,7 +87,7 @@ _usage() {
 
   ${_CLR_BOLD}Environment${_CLR_RESET}
     CLAUDE_HOME               Override default ~/.claude  (default: ~/.claude)
-    KITSYNC_TIMEOUT           Background pull timeout in seconds  (default: 2)
+    KITSYNC_TIMEOUT           Background pull: download timeout in seconds  (default: 10)
 
 USAGE
 }

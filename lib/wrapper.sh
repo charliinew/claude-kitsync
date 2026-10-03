@@ -21,170 +21,105 @@ claude() {
   # LOCAL_OPTIONS scopes the change to this function only (zsh restores on exit).
   [[ -n "${ZSH_VERSION:-}" ]] && setopt LOCAL_OPTIONS NO_MONITOR NO_NOTIFY 2>/dev/null || true
 
+  # Not a session (version, help, updates, MCP/config management): no sync
+  case "${1:-}" in
+    -v|--version|-h|--help|update|install|doctor|mcp|config|plugin|migrate-installer|setup-token)
+      command claude "$@"
+      return
+      ;;
+  esac
+
   local _ks_home="${CLAUDE_HOME:-$HOME/.claude}"
   local _ks_cfg="$_ks_home/.kitsync/config"
 
   # Load sync preferences (defaults: auto pull, end-of-session push)
-  local _ks_pull="auto"
-  local _ks_push="end_of_session"
-  local _ks_timer="15"
+  local _ks_pull="auto" _ks_push="end_of_session" _ks_timer="15" _v
   if [[ -f "$_ks_cfg" ]]; then
-    local _v
     _v="$(grep '^KITSYNC_PULL_MODE=' "$_ks_cfg" 2>/dev/null | cut -d= -f2-)" && [[ -n "$_v" ]] && _ks_pull="$_v"
     _v="$(grep '^KITSYNC_PUSH_MODE=' "$_ks_cfg" 2>/dev/null | cut -d= -f2-)" && [[ -n "$_v" ]] && _ks_push="$_v"
     _v="$(grep '^KITSYNC_PUSH_TIMER=' "$_ks_cfg" 2>/dev/null | cut -d= -f2-)" && [[ -n "$_v" ]] && _ks_timer="$_v"
   fi
+  [[ "$_ks_timer" =~ ^[0-9]+$ ]] && [[ "$_ks_timer" -gt 0 ]] || _ks_timer=15
 
-  local _ks_is_repo=false
-  [[ -d "$_ks_home" ]] && git -C "$_ks_home" rev-parse --git-dir &>/dev/null 2>&1 && _ks_is_repo=true
+  local _ks_on=false
+  [[ -d "$_ks_home/.git" ]] && command -v claude-kitsync &>/dev/null && _ks_on=true
 
-  # _ks_bg — launch subshell silently in background (no job notification)
-  # zsh: &! disowns atomically without printing PID; bash: & + disown
+  # _ks_bg <cmd...> — run silently in the background, detached from this shell.
+  # Backgrounded inside a subshell: the job belongs to the subshell, so neither
+  # bash nor zsh prints a PID or "Done" (zsh's `&!` is a syntax error in bash).
   _ks_bg() {
-    if [[ -n "${ZSH_VERSION:-}" ]]; then
-      ("$@") &!
-    else
-      ("$@") &
-      disown
-    fi
+    ("$@" >/dev/null 2>&1 &)
   }
 
-  # Show notification if a previous auto-pull left a conflict pending
+  # Notices left by background syncs
   local _ks_cf="$_ks_home/.kitsync/conflict_pending"
   if [[ -f "$_ks_cf" ]]; then
     printf "\n\033[33m⚠  kitsync: sync conflict pending\033[0m\n" >&2
-    local _ks_cf_files
-    _ks_cf_files="$(grep '^files:' "$_ks_cf" 2>/dev/null | cut -d: -f2-)"
-    [[ -n "$_ks_cf_files" ]] && printf "   Conflicting: %s\n" "$_ks_cf_files" >&2
+    _v="$(grep '^files:' "$_ks_cf" 2>/dev/null | cut -d: -f2-)"
+    [[ -n "$_v" ]] && printf "   Conflicting: %s\n" "$_v" >&2
     printf "   Resolve now:   claude-kitsync pull\n" >&2
     printf "   Accept remote: claude-kitsync pull --force\n\n" >&2
   fi
-
-  # Display pending notice from previous session's pull (before launching Claude)
+  local _ks_warn="$_ks_home/.kitsync/sync-warning"
+  if [[ -f "$_ks_warn" ]]; then
+    printf '\n\033[1;33m[kitsync]\033[0m  %s\n\n' "$(cat "$_ks_warn" 2>/dev/null)" >&2
+    rm -f "$_ks_warn" 2>/dev/null || true
+  fi
   local _ks_notice="$_ks_home/.kitsync/pending-notice"
   if [[ -f "$_ks_notice" ]]; then
     printf '\n\033[1;33m[kitsync]\033[0m  Config updated from remote — settings or agents may have changed.\n\n' >&2
     rm -f "$_ks_notice" 2>/dev/null || true
   fi
 
-  # Auto-pull on launch (background, non-blocking)
-  # SHA comparison detects new commits → writes pending-notice for next launch.
-  if [[ "$_ks_is_repo" == true ]] && [[ "$_ks_pull" == "auto" ]]; then
-    _ks_auto_pull() {
-      local _h="$1" _cf="$1/.kitsync/conflict_pending"
-      local _sha_b
-      _sha_b="$(git -C "$_h" rev-parse HEAD 2>/dev/null || true)"
-      local _pull_exit=0
-      # timeout is not built into macOS zsh; fall back to gtimeout (brew coreutils)
-      # or run without timeout (already in a background subshell, blocking is harmless).
-      local _ks_to="${KITSYNC_TIMEOUT:-2}"
-      if command -v timeout &>/dev/null; then
-        timeout "$_ks_to" git -C "$_h" pull --rebase --autostash -q 2>/dev/null || _pull_exit=$?
-      elif command -v gtimeout &>/dev/null; then
-        gtimeout "$_ks_to" git -C "$_h" pull --rebase --autostash -q 2>/dev/null || _pull_exit=$?
-      else
-        git -C "$_h" pull --rebase --autostash -q 2>/dev/null || _pull_exit=$?
-      fi
-      if [[ $_pull_exit -eq 0 ]]; then
-        rm -f "$_cf" 2>/dev/null || true
-        local _sha_a
-        _sha_a="$(git -C "$_h" rev-parse HEAD 2>/dev/null || true)"
-        if [[ -n "$_sha_b" ]] && [[ "$_sha_b" != "$_sha_a" ]]; then
-          mkdir -p "$_h/.kitsync" 2>/dev/null || true
-          printf 'updated\n' > "$_h/.kitsync/pending-notice" 2>/dev/null || true
-        fi
-        command -v claude-kitsync &>/dev/null && claude-kitsync _post-pull-hook 2>/dev/null || true
-      elif [[ $_pull_exit -ne 124 ]]; then
-        # git pull failed with a non-timeout exit. Abort any in-progress rebase,
-        # then check whether there are real merge conflicts before flagging.
-        git -C "$_h" rebase --abort 2>/dev/null || true
-        local _files
-        _files="$(git -C "$_h" diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ',' | sed 's/,$//')"
-        # Only write the sentinel when there are actual conflicting files —
-        # transient git errors (network, lock) must not produce a stale warning.
-        if [[ -n "$_files" ]]; then
-          mkdir -p "$_h/.kitsync" 2>/dev/null || true
-          printf 'files:%s\n' "$_files" > "$_cf"
-        fi
-      else
-        # Timeout — abort any partial rebase silently, do not flag as conflict
-        git -C "$_h" rebase --abort 2>/dev/null || true
-      fi
-    }
-    if [[ -n "${ZSH_VERSION:-}" ]]; then
-      (_ks_auto_pull "$_ks_home") &!
-    else
-      (_ks_auto_pull "$_ks_home") &
-      disown
-    fi
-    unset -f _ks_auto_pull
+  # Auto-pull on launch: the real pull logic (selective sync, decryption,
+  # conflicts), non-blocking; it never touches uncommitted local changes
+  if [[ "$_ks_on" == true ]] && [[ "$_ks_pull" == "auto" ]]; then
+    _ks_bg claude-kitsync pull --auto
   fi
 
-  # Timer-based push: sentinel file controls loop lifetime
+  # Timer push: stops when the session ends (sentinel removed) or when this
+  # shell is gone (terminal closed before the session ended)
   local _ks_sentinel=""
-  if [[ "$_ks_is_repo" == true ]] && [[ "$_ks_push" == "timer" ]]; then
-    _ks_sentinel="$(mktemp /tmp/kitsync-XXXX 2>/dev/null || true)"
-    if [[ -n "${ZSH_VERSION:-}" ]]; then
-      (while [[ -f "$_ks_sentinel" ]]; do
-         sleep "${_ks_timer}m"
-         [[ -f "$_ks_sentinel" ]] || break
-         command -v claude-kitsync &>/dev/null && \
-           claude-kitsync push --auto "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" >/dev/null || true
-       done) &!
-    else
-      (while [[ -f "$_ks_sentinel" ]]; do
-         sleep "${_ks_timer}m"
-         [[ -f "$_ks_sentinel" ]] || break
-         command -v claude-kitsync &>/dev/null && \
-           claude-kitsync push --auto "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" >/dev/null || true
-       done) &
-      disown
-    fi
+  if [[ "$_ks_on" == true ]] && [[ "$_ks_push" == "timer" ]]; then
+    _ks_sentinel="$(mktemp "${TMPDIR:-/tmp}/kitsync-timer.XXXXXX" 2>/dev/null || true)"
+    _ks_timer_loop() {
+      while sleep "$(( $2 * 60 ))"; do
+        [[ -f "$1" ]] && kill -0 "$3" 2>/dev/null || break
+        claude-kitsync push --auto "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')"
+      done
+      rm -f "$1"
+    }
+    [[ -n "$_ks_sentinel" ]] && _ks_bg _ks_timer_loop "$_ks_sentinel" "$_ks_timer" "$$"
   fi
 
-  # Safety net: if settings.json still contains __CLAUDE_HOME__ tokens (e.g. after
-  # a push that was interrupted between paths_tokenize and paths_detokenize), fix
-  # them before launching Claude so hooks receive real paths.
-  local _ks_settings="$_ks_home/settings.json"
-  if [[ -f "$_ks_settings" ]] && grep -qF "__CLAUDE_HOME__" "$_ks_settings" 2>/dev/null; then
-    local _ks_repl
-    _ks_repl="$(printf '%s' "$_ks_home" | sed 's|[&\\|]|\\&|g')"
+  # Safety net: if settings.json still contains __CLAUDE_HOME__ / __HOME__ tokens
+  # (e.g. a push interrupted between tokenize and detokenize), fix them before
+  # launching Claude so hooks receive real paths.
+  local _ks_settings="$_ks_home/settings.json" _ks_tok _ks_val
+  for _ks_tok in __CLAUDE_HOME__ __HOME__; do
+    [[ -f "$_ks_settings" ]] && grep -qF "$_ks_tok" "$_ks_settings" 2>/dev/null || continue
+    [[ "$_ks_tok" == __HOME__ ]] && _ks_val="$HOME" || _ks_val="$_ks_home"
+    _ks_val="$(printf '%s' "$_ks_val" | sed 's|[&\\|]|\\&|g')"
     if [[ "$(uname -s)" == "Darwin" ]]; then
-      sed -i '' "s|__CLAUDE_HOME__|${_ks_repl}|g" "$_ks_settings" 2>/dev/null || true
+      sed -i '' "s|${_ks_tok}|${_ks_val}|g" "$_ks_settings" 2>/dev/null || true
     else
-      sed -i "s|__CLAUDE_HOME__|${_ks_repl}|g" "$_ks_settings" 2>/dev/null || true
+      sed -i "s|${_ks_tok}|${_ks_val}|g" "$_ks_settings" 2>/dev/null || true
     fi
-  fi
-  if [[ -f "$_ks_settings" ]] && grep -qF "__HOME__" "$_ks_settings" 2>/dev/null; then
-    local _ks_repl_home
-    _ks_repl_home="$(printf '%s' "$HOME" | sed 's|[&\\|]|\\&|g')"
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-      sed -i '' "s|__HOME__|${_ks_repl_home}|g" "$_ks_settings" 2>/dev/null || true
-    else
-      sed -i "s|__HOME__|${_ks_repl_home}|g" "$_ks_settings" 2>/dev/null || true
-    fi
-  fi
+  done
 
   # Run the real claude binary
   command claude "$@"
   local _ks_exit=$?
 
   # Stop timer loop
-  [[ -n "$_ks_sentinel" ]] && rm -f "$_ks_sentinel" 2>/dev/null || true
+  [[ -n "$_ks_sentinel" ]] && rm -f "$_ks_sentinel" 2>/dev/null
 
-  # End-of-session push (background, non-blocking)
-  if [[ "$_ks_is_repo" == true ]] && [[ "$_ks_push" == "end_of_session" ]]; then
-    if [[ -n "${ZSH_VERSION:-}" ]]; then
-      (command -v claude-kitsync &>/dev/null && \
-        claude-kitsync push --auto "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" >/dev/null || true) &!
-    else
-      (command -v claude-kitsync &>/dev/null && \
-        claude-kitsync push --auto "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')" >/dev/null || true) &
-      disown
-    fi
+  # End-of-session push (background, non-blocking; waits for a running pull)
+  if [[ "$_ks_on" == true ]] && [[ "$_ks_push" == "end_of_session" ]]; then
+    _ks_bg claude-kitsync push --auto "kitsync: auto-push $(date '+%Y-%m-%d %H:%M')"
   fi
 
-  unset -f _ks_bg
+  unset -f _ks_bg _ks_timer_loop 2>/dev/null
   return $_ks_exit
 }
 # kitsync-end

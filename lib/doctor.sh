@@ -12,32 +12,6 @@ _doc_err()  { log_error "$1"; _DOC_ERRORS=$(( _DOC_ERRORS + 1 )); }
 _doc_hint() { printf '      %s\n' "$1" >&2; }
 _doc_section() { printf '\n  %s%s%s\n' "$_CLR_BOLD" "$1" "$_CLR_RESET" >&2; }
 
-# _with_timeout <seconds> <cmd...> — timeout(1) is missing on stock macOS
-_with_timeout() {
-  local secs="$1"; shift
-  if command -v timeout &>/dev/null; then
-    timeout "$secs" "$@"
-  elif command -v gtimeout &>/dev/null; then
-    gtimeout "$secs" "$@"
-  else
-    perl -e 'alarm shift; exec @ARGV or exit 127' "$secs" "$@"
-  fi
-}
-
-# _doc_git_remote <git args...> — network git call that can't hang on a prompt
-_doc_git_remote() {
-  (
-    export GIT_TERMINAL_PROMPT=0
-    # BatchMode: fail instead of asking for a passphrase/host key — unless the
-    # user already drives ssh through core.sshCommand / GIT_SSH_COMMAND
-    if [[ -z "${GIT_SSH_COMMAND:-}" ]] && \
-       ! git -C "$CLAUDE_HOME" config --get core.sshCommand &>/dev/null; then
-      export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10"
-    fi
-    _with_timeout 15 git -C "$CLAUDE_HOME" "$@"
-  )
-}
-
 # ---------------------------------------------------------------------------
 # Config repo
 # ---------------------------------------------------------------------------
@@ -60,7 +34,7 @@ _doc_check_repo() {
     return 0
   fi
   local out
-  if out="$(_doc_git_remote ls-remote -q origin HEAD 2>&1)"; then
+  if out="$(_git_net ls-remote -q origin HEAD 2>&1)"; then
     _doc_ok "Remote reachable: $url"
   else
     _doc_err "Remote unreachable: $url — automatic pushes are failing"
@@ -110,7 +84,7 @@ _doc_check_sync() {
   fi
 
   # Refresh the remote-tracking ref so "behind" is current (best effort)
-  _doc_git_remote fetch -q origin &>/dev/null || true
+  _git_net fetch -q origin &>/dev/null || true
   local counts ahead behind
   counts="$(git -C "$CLAUDE_HOME" rev-list --left-right --count 'HEAD...@{u}' 2>/dev/null || echo "0 0")"
   read -r ahead behind <<< "$counts"

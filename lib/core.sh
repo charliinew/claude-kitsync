@@ -115,6 +115,33 @@ _config_set() {
 }
 
 # ---------------------------------------------------------------------------
+# _with_timeout <seconds> <cmd...> — timeout(1) is missing on stock macOS
+_with_timeout() {
+  local secs="$1"; shift
+  if command -v timeout &>/dev/null; then
+    timeout "$secs" "$@"
+  elif command -v gtimeout &>/dev/null; then
+    gtimeout "$secs" "$@"
+  else
+    perl -e 'alarm shift; exec @ARGV or exit 127' "$secs" "$@"
+  fi
+}
+
+# _git_net <git args...> — network git call that can't hang on a prompt
+_git_net() {
+  (
+    export GIT_TERMINAL_PROMPT=0
+    # BatchMode: fail instead of asking for a passphrase/host key — unless the
+    # user already drives ssh through core.sshCommand / GIT_SSH_COMMAND
+    if [[ -z "${GIT_SSH_COMMAND:-}" ]] && \
+       ! git -C "$CLAUDE_HOME" config --get core.sshCommand &>/dev/null; then
+      export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10"
+    fi
+    _with_timeout "${KITSYNC_NET_TIMEOUT:-15}" git -C "$CLAUDE_HOME" "$@"
+  )
+}
+
+# ---------------------------------------------------------------------------
 # die — log error and exit
 # ---------------------------------------------------------------------------
 die() {
