@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.2] — 2026-10-04
+
+### Fixed
+- **A local commit whose push hit a conflict was silently lost**: the next background pull rebased with "remote wins" (`-X ours`), dropped the local change and cleared the conflict notice. Pulls no longer force a side: changes to different lines merge, and a real conflict is left for you (the background pull changes nothing and Claude Code shows the notice).
+- **The conflict menu's "Accept remote" ran `git reset --hard`**, erasing every unpushed local commit (even unrelated ones), with no backup — and it was picked automatically without a terminal. It is gone.
+- **"Keep local" did nothing**, so the next push failed again on the same conflict.
+- The conflict notice suggested `pull --force` to "take the remote", which it didn't do.
+- `claude-kitsync pull` refused to run as soon as any file was modified; it now only stops on edits to files the remote changed, and names them.
+- The conflict notice could fail to be written when `.kitsync/` did not exist yet.
+
+### Changed
+- **`claude-kitsync pull` resolves conflicts file by file**: a labelled diff, then **remote** (your version is backed up to `.kitsync/backups/pull-<date>/`) or **local** (kept and pushed right away). Without a terminal nothing is decided and the conflict is recorded.
+- **`pull --force`** takes the remote for every conflicting file — committed or not — and backs up the local versions.
+
 ## [1.2.1] — 2026-10-04
 
 ### Fixed
