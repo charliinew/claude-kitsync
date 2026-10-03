@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.2.0] — 2026-10-03
+
+### Changed
+- **Sync now runs from Claude Code hooks instead of a `claude()` function in your shell rc.** `settings.json` gets three entries: `SessionStart` (background pull + sync notices), `SessionEnd` (background push) and, in timer mode only, `Stop` (push at most every N minutes). Claude Code fires them in every session — terminal, IDE extensions, desktop app — where the shell function only covered `claude` typed in a terminal. Each hook only starts a detached job, so Claude never waits on the network.
+- **Upgrading migrates automatically**: the hooks are added (your own hooks are kept, `settings.json` is backed up) and the `claude()` block is removed from your rc file. Without `python3`, kitsync keeps the shell function as a fallback.
+- `claude-kitsync settings` → "Sync triggers" installs/repairs the hooks or turns automatic sync off; `doctor` reports which trigger is active; `uninstall` removes the hooks too. Changing the push mode adds or removes the `Stop` hook.
+- Sync notices (pending conflict, file not pushed, config updated) are shown by Claude Code at session start.
+
+### Fixed
+- **`push` when another machine had pushed first** failed and still printed "Push complete." It now replays your commits on top of the remote and retries; a real conflict keeps your commit locally and is reported for `claude-kitsync pull`.
+- `init` generated `settings.template.json` before its last change to `settings.json`, so every machine committed its own version and the next push conflicted.
+- `init` on a second machine reported `settings.json` as a conflict when only formatting or kitsync's own hook entries differed.
+
+### Removed
+- `templates/shell-wrapper.sh`, an unused copy of the old wrapper.
+
 ## [1.1.15] — 2026-10-03
 
 ### Fixed
