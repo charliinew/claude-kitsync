@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.3] — 2026-10-04
+
+### Fixed
+- **A machine that didn't pull a category could undo the others' changes to it**: it kept its old version locally and pushed it back at the end of the session (the push selection defaulted to everything). A category not pulled is now never pushed; the preferences menu says so.
+- **A non-pulled category blocked every later pull, silently**: the kept local version looked like an unpushed edit, and since 1.2.1 the background pull skipped without telling anyone. Non-pulled paths are now held aside during the rebase and put back, so they never get in the way.
+- **A background pull skipped because of a local edit is now reported** (shown at the next session) instead of being skipped silently, for good.
+- **Under encryption, excluding `settings.json` from pulls had no effect**: the decrypted remote version overwrote the local one. `settings.json.enc` now follows the `settings.json` category.
+- **The same new file created on two machines** made every pull fail without saying why (git refuses to overwrite an untracked file). It is now reported as a conflict; `pull --force` takes the remote's and backs up yours.
+
 ## [1.2.2] — 2026-10-04
 
 ### Fixed
