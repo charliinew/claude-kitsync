@@ -140,7 +140,7 @@ function formatSessionPart(
 
 	if (config.cost.enabled) {
 		const formattedCost = formatCost(cost, config.cost.format);
-		items.push(`${colors.gray("$")}${colors.dimWhite(formattedCost)}`);
+		items.push(`${colors.green("$")}${colors.green(formattedCost)}`);
 	}
 
 	if (config.tokens.enabled) {
@@ -379,7 +379,7 @@ export function renderStatuslineRaw(
 	if (gitPart) line1Parts.push(gitPart);
 
 	const pathPart = formatPath(data.path, config.pathDisplayMode);
-	line1Parts.push(colors.gray(pathPart));
+	line1Parts.push(colors.cyan(pathPart));
 
 	const isSonnet = data.modelName.toLowerCase().includes("sonnet");
 	if (!isSonnet || config.showSonnetModel) {

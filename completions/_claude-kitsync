@@ -26,6 +26,7 @@ _claude_kitsync() {
         'doctor[Run health checks on your setup]' \
         'restore[Restore a rc file from a kitsync backup]' \
         'upgrade[Update claude-kitsync to the latest version]' \
+        'setup-kit[Wire the starter kit hooks and status line into settings.json]' \
         'uninstall[Remove claude-kitsync completely]'
       ;;
     args)
@@ -53,6 +54,10 @@ _claude_kitsync() {
             '--dev[Upgrade to the latest commit on main]' \
             '--force[Discard local changes in the install directory]' \
             '--no-verify[Skip the release signature check]' \
+          ;;
+        setup-kit)
+          _arguments \
+            '--print[Show the settings.json snippet instead of editing it]' \
           ;;
         uninstall)
           _arguments \

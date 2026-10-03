@@ -229,11 +229,132 @@ Show COMPACT initialization summary (one table, then proceed immediately):
 KEEP OUTPUT MINIMAL:
 - One line header with task
 - One table with ALL variables (use brackets to show they're available)
-- One line "→ Analyzing..." then IMMEDIATELY load step-01
+- One line "→ Analyzing..." then IMMEDIATELY proceed to step-01
 - NO verbose explanations, NO parsing logs, NO separators
 </critical>
 
-**Then proceed directly to step-01-analyze.md**
+**If `{save_mode}` = false:**
+→ Load step-01-analyze.md directly (standard flow, accumulated context)
+
+**If `{save_mode}` = true:**
+→ Execute the ISOLATED AGENT FLOW below (each step runs in a fresh agent)
+
+---
+
+## ISOLATED AGENT FLOW (save_mode = true only)
+
+When save_mode is active, each step runs as a **fresh subagent** that reads only the previous step's saved file. This prevents context accumulation and "lost in the middle" issues.
+
+You (step-00) act as the lightweight orchestrator. Spawn each agent sequentially, wait for completion, then spawn the next.
+
+**When constructing agent prompts: replace ALL `{variables}` with their actual resolved values.**
+
+### Agent 1 — Analyze
+
+```
+Execute APEX Step 1 (Analyze) for this task.
+
+## Task
+{task_description}
+
+## State
+- Task ID: {task_id}
+- Output dir: {output_dir}
+- Skill dir: {skill_dir}
+- Economy mode: {economy_mode}
+- Auto mode: {auto_mode}
+
+## Instructions
+1. Read step instructions: {skill_dir}/steps/step-01-analyze.md
+2. Execute the analysis exactly as instructed
+3. Save findings to {output_dir}/01-analyze.md
+4. Return a brief summary (files found, patterns identified)
+
+This is the first step — no prior context file to read.
+```
+
+Wait for this agent to complete before proceeding.
+
+### Agent 2 — Plan
+
+```
+Execute APEX Step 2 (Plan) for this task.
+
+## Task
+{task_description}
+
+## State
+- Task ID: {task_id}
+- Output dir: {output_dir}
+- Skill dir: {skill_dir}
+- Auto mode: {auto_mode}
+
+## Context from Step 1
+Read ONLY this file for context: {output_dir}/01-analyze.md
+
+## Instructions
+1. Read {output_dir}/01-analyze.md (your only context from step 1)
+2. Read {skill_dir}/steps/step-02-plan.md for instructions
+3. Create the implementation plan as instructed
+4. Save plan to {output_dir}/02-plan.md
+5. Return a brief plan summary
+```
+
+Wait for this agent to complete before proceeding.
+
+### Agent 3 — Execute
+
+```
+Execute APEX Step 3 (Execute) for this task.
+
+## Task
+{task_description}
+
+## State
+- Task ID: {task_id}
+- Output dir: {output_dir}
+- Skill dir: {skill_dir}
+- Auto mode: {auto_mode}
+
+## Context from Step 2
+Read ONLY this file for context: {output_dir}/02-plan.md
+
+## Instructions
+1. Read {output_dir}/02-plan.md (your only context — the approved plan)
+2. Read {skill_dir}/steps/step-03-execute.md for instructions
+3. Implement exactly as instructed — no scope creep
+4. Save execution log to {output_dir}/03-execute.md
+5. Return a brief summary of what was implemented
+```
+
+Wait for this agent to complete before proceeding.
+
+### Agent 4 — Validate
+
+```
+Execute APEX Step 4 (Validate) for this task.
+
+## Task
+{task_description}
+
+## State
+- Task ID: {task_id}
+- Output dir: {output_dir}
+- Skill dir: {skill_dir}
+- Auto mode: {auto_mode}
+
+## Context from Step 3
+Read ONLY this file for context: {output_dir}/03-execute.md
+
+## Instructions
+1. Read {output_dir}/03-execute.md (your only context — the execution log)
+2. Read {skill_dir}/steps/step-04-validate.md for instructions
+3. Validate as instructed (typecheck, lint, AC verification)
+4. Save validation results to {output_dir}/04-validate.md
+5. Return validation summary with pass/fail status
+```
+
+Wait for this agent to complete. Then present the final summary to the user.
 
 ---
 
@@ -265,7 +386,9 @@ KEEP OUTPUT MINIMAL:
 
 ## NEXT STEP:
 
-After showing initialization summary, always proceed directly to `./step-01-analyze.md`
+After showing initialization summary:
+- **`{save_mode}` = false** → Load `./step-01-analyze.md` directly
+- **`{save_mode}` = true** → Execute ISOLATED AGENT FLOW (spawn agents sequentially)
 
 <critical>
 Remember:
@@ -273,4 +396,5 @@ Remember:
 - Output MUST be compact: one table, no verbose logs
 - Use `{variable}` notation to show available state
 - Proceed immediately - never block!
+- In save_mode: YOU are the orchestrator — spawn agents, don't load steps yourself
 </critical>

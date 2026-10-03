@@ -65,13 +65,14 @@ Use one install method only: Homebrew (`brew upgrade claude-kitsync`) or the scr
 | `claude-kitsync diff` | Show diff between local and remote before pushing |
 | `claude-kitsync publish` | Package and publish agents/skills as a kit to GitHub |
 | `claude-kitsync restore` | Restore a rc file from a timestamped backup |
+| `claude-kitsync setup-kit [--print]` | Wire the starter kit's hooks and status line into `settings.json` (`--print`: show the snippet instead) |
 | `claude-kitsync install [--skill] <url>` | Merge a public kit into `~/.claude` (no overwrite of local config); `--skill` installs skills only |
 | `claude-kitsync profile [list\|add\|switch\|remove]` | Manage named remotes for multi-environment sync (work, perso…) |
 | `claude-kitsync encrypt [enable\|disable\|rotate\|status]` | Encrypt `settings.json` with AES-256 before push (opt-in) |
 | `claude-kitsync settings` | Interactive menu to change pull/push mode, remote URL, wrapper |
 | `claude-kitsync doctor` | Diagnose the health of your setup |
 | `claude-kitsync upgrade` | Update claude-kitsync to the latest release (signature checked, release notes shown) |
-| `claude-kitsync uninstall` | Fully remove claude-kitsync (binary, PATH, shell wrapper) |
+| `claude-kitsync uninstall [--yes]` | Remove claude-kitsync (binary, PATH, shell wrapper); `~/.claude` is kept |
 
 ---
 
@@ -123,6 +124,18 @@ Run `claude-kitsync pull` once — it registers the path filter for this machine
 ### Can I use this with a private repo?
 
 Yes — `claude-kitsync init --remote git@github.com:you/private-claude-config.git`. The remote is just a standard git remote. Use SSH keys or HTTPS tokens as you normally would.
+
+### What is in the starter kit, and what does it need?
+
+`init` offers to import a starter config (agents, skills, `CLAUDE.md`, a hook and two scripts). Nothing is preselected for you to import blindly: pick what you want. The hook and scripts only run once `settings.json` points to them — `init` offers to do it (with a backup), or run `claude-kitsync setup-kit` later; `setup-kit --print` shows the snippet to add by hand.
+
+| Component | What it does | Needs |
+|---|---|---|
+| `hooks/rm_to_trash.py` | Every `rm` Claude runs goes to the system trash instead, so a wrong deletion can be undone. `git rm`, `terraform state rm`… are left alone. With no trash command installed, Claude's `rm` is blocked — never run for real. | `python3`, and a trash command: built in on macOS 15+ (`brew install trash` on older macOS); `trash-cli` (`apt`/`dnf`/`pacman`) or `gio` on Linux |
+| `scripts/command-validator` | Blocks dangerous shell commands (`rm -rf`, `curl \| sh`, writes to system paths…) before Claude runs them | [Bun](https://bun.sh) |
+| `scripts/statusline` | Status line: git branch, path, session cost, context usage | Bun |
+
+An existing status line of yours is never replaced, and running `setup-kit` twice adds nothing twice.
 
 ### How do I install someone else's agent pack?
 
@@ -177,6 +190,7 @@ This removes the binary, PATH entry, and shell wrapper in one command.
 - git 2.x
 - Standard POSIX utilities (`sed`, `awk`, `find`, `mktemp`)
 - macOS or Linux
+- Optional, for the starter kit's hook and scripts: `python3`, a trash command, [Bun](https://bun.sh) (see FAQ)
 
 ---
 

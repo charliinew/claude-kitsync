@@ -4,7 +4,7 @@ _claude_kitsync() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  local commands="init push pull status log diff publish install profile encrypt settings doctor restore upgrade uninstall"
+  local commands="init push pull status log diff publish install profile encrypt settings doctor restore setup-kit upgrade uninstall"
 
   if [[ $COMP_CWORD -eq 1 ]]; then
     COMPREPLY=($(compgen -W "$commands" -- "$cur"))
@@ -29,6 +29,9 @@ _claude_kitsync() {
       ;;
     upgrade)
       COMPREPLY=($(compgen -W "--dev --force --no-verify" -- "$cur"))
+      ;;
+    setup-kit)
+      COMPREPLY=($(compgen -W "--print" -- "$cur"))
       ;;
     uninstall)
       COMPREPLY=($(compgen -W "--yes" -- "$cur"))

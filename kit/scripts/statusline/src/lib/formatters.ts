@@ -191,9 +191,8 @@ function getProgressBarColor(
 	colorMode: ProgressBarColor,
 ): ColorFunction {
 	if (colorMode === "progressive") {
-		if (percentage < 50) return colors.gray;
-		if (percentage < 70) return colors.yellow;
-		if (percentage < 90) return colors.orange;
+		if (percentage < 50) return colors.yellow;
+		if (percentage < 80) return colors.orange;
 		return colors.red;
 	}
 	if (colorMode === "green") return colors.green;

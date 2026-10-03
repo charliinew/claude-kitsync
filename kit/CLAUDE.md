@@ -15,4 +15,4 @@ claude-kitsync pull     # pull latest from remote
 ## Workflow
 
 - `claude` is wrapped — a background pull runs silently on each launch
-- Use `/push` or `claude-kitsync push -m "message"` after editing agents/skills
+- Changes are pushed when a session ends; push now with `claude-kitsync push -m "message"`

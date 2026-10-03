@@ -641,8 +641,8 @@ GITIGNORE
         "CLAUDE.md       — project memory / instructions"
         "agents/         — custom agents"
         "skills/         — slash commands"
-        "hooks/          — lifecycle hooks"
-        "scripts/        — helper scripts"
+        "hooks/          — rm goes to the trash (needs python3)"
+        "scripts/        — status line + command validator (needs Bun)"
         "rules/          — coding rules"
       )
 
@@ -665,13 +665,17 @@ GITIGNORE
       elif [[ ${#_kit_items[@]} -gt 0 ]]; then
         printf "\n"
         local _kit_selected
-        _kit_selected="$(_select_multi "Import claude-kitsync starter config?" "${_kit_labels[@]}")"
+        # Nothing preselected: Enter alone imports nothing
+        _kit_selected="$(_SELECT_MULTI_DEFAULT=0 _select_multi \
+          "Import claude-kitsync starter config? (Space to pick, Enter to confirm)" "${_kit_labels[@]}")"
 
         if [[ -n "$_kit_selected" ]]; then
           log_step "Importing starter config into $CLAUDE_HOME..."
           _KIT_CONFLICT_ALL="skip"  # skip conflicting files — only import items not already present
+          local _kit_code=false
           for _kidx in $_kit_selected; do
-            local _kitem="${_kit_items[$((${_kidx} - 1))]}"
+            local _kitem="${_kit_items[$((_kidx - 1))]}"
+            [[ "$_kitem" == hooks || "$_kitem" == scripts ]] && _kit_code=true
             local _ksrc="$_kit_root/$_kitem"
             if [[ -d "$_ksrc" ]]; then
               _copy_kit_dir "$_ksrc" "$CLAUDE_HOME"
@@ -680,6 +684,7 @@ GITIGNORE
             fi
           done
           log_success "Starter config imported."
+          [[ "$_kit_code" == true ]] && _kit_setup_prompt
         fi
       fi
     fi

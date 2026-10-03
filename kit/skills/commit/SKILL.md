@@ -25,9 +25,9 @@ Quick commit with conventional message format, then push.
 
 2. **Generate commit message**:
    - Format: `type(scope): brief description`
-   - Types: `feat`, `fix`, `update`, `docs`, `chore`, `refactor`, `test`, `perf`, `revert`
+   - Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`, `ci`, `revert`
    - Under 72 chars, imperative mood, lowercase after colon
-   - Example: `update(statusline): refresh spend data`
+   - Example: `chore(statusline): refresh spend data`
 
 3. **Commit**: `git commit -m "message"`
 

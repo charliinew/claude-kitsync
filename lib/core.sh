@@ -244,14 +244,17 @@ _select_multi() {
   local cur=0
   local i
 
-  # All selected by default
+  # All selected by default; _SELECT_MULTI_DEFAULT=0 starts with none
+  local def="${_SELECT_MULTI_DEFAULT:-1}"
   local sel=()
-  for (( i=0; i<n; i++ )); do sel+=("1"); done
+  for (( i=0; i<n; i++ )); do sel+=("$def"); done
 
-  # No terminal: the default (everything)
+  # No terminal: the default
   if ! _has_tty; then
     local all=""
-    for (( i=1; i<=n; i++ )); do all+="$i "; done
+    if [[ "$def" == 1 ]]; then
+      for (( i=1; i<=n; i++ )); do all+="$i "; done
+    fi
     printf '%s' "${all% }"
     return 0
   fi

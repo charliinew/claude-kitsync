@@ -148,14 +148,26 @@ For implementation details, see `steps/step-00-init.md`.
 </resume_workflow>
 
 <workflow>
-**Standard flow:**
-1. Parse flags and task description
+**Standard flow (save_mode = false):**
+1. Parse flags and task description (step-00)
 2. If `-r`: Execute resume workflow
-3. If `-s`: Create output folder and 00-context.md
-4. Load step-01-analyze.md → gather context
-5. Load step-02-plan.md → create strategy
-6. Load step-03-execute.md → implement
-7. Load step-04-validate.md → verify and complete
+3. Load step-01-analyze.md → gather context
+4. Load step-02-plan.md → create strategy
+5. Load step-03-execute.md → implement
+6. Load step-04-validate.md → verify and complete
+
+Main Claude accumulates context across all steps — fast and simple.
+
+**Isolated agent flow (save_mode = true):**
+1. Run step-00 in main context → create output folder + 00-context.md
+2. Spawn Agent → executes step-01, saves to 01-analyze.md → exits
+3. Spawn Agent → reads 01-analyze.md only, executes step-02, saves to 02-plan.md → exits
+4. Spawn Agent → reads 02-plan.md only, executes step-03, saves to 03-execute.md → exits
+5. Spawn Agent → reads 03-execute.md only, executes step-04, validates → exits
+
+Each agent starts fresh with only the context it needs.
+Main Claude is a lightweight orchestrator — no context accumulation between steps.
+This prevents "lost in the middle" across the full workflow.
 </workflow>
 
 <state_variables>
