@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.1] — 2026-10-04
+
+### Fixed
+- **Deleted files were never pushed**: push only staged paths that still existed, so a deleted `CLAUDE.md` or folder stayed on the remote, came back on other machines, and left the tree dirty. Deletions are pushed now.
+- **Background pulls stopped forever on a machine with a local-only edit** (a category excluded from push, such as `settings.json` that Claude Code rewrites): since 1.1.15 `pull --auto` skipped on any local change. It now skips only when the remote changed one of the same files; other local edits are set aside and put back.
+- **Selective pull could overwrite a local edit** in an excluded category: it restored the whole folder to its pre-pull state. It now restores only the files the pull changed.
+- **Per-machine preferences were synced**, so the last machine to push imposed its pull/push modes, categories, timer and upgrade channel on all the others. They now live in `.kitsync/local` (never synced); `.kitsync/config` keeps what machines must share (encryption, profiles). Existing setups migrate automatically, each machine keeping its own values.
+
+### Added
+- **Secret check on push**: a file whose new lines look like an API key or token (Anthropic, OpenAI, GitHub, AWS, Slack, Google, private keys) is left out with a warning — the secret itself is never printed. `claude-kitsync push --allow-secret <file>` lets a file through.
+- `push --dry-run` runs the real staging on a throwaway index: it previews encrypted settings and shows what would be left out (half-merged files, invalid JSON, secrets), then restores the derived files it wrote.
+
 ## [1.2.0] — 2026-10-03
 
 ### Changed
