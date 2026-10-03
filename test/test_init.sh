@@ -94,14 +94,51 @@ run_test_ini_local_choice_survives_push() {
   git -C "$other" add -A && git -C "$other" commit -q -m remote
   git -C "$other" push -q origin HEAD:main 2>/dev/null
 
-  # Fresh ~/.claude with its own CLAUDE.md; the user picks LOCAL on conflict
+  # Fresh ~/.claude with its own CLAUDE.md; the user types "l" at the real
+  # prompt (lowercase: the old ${x^^} crashed on macOS's bash 3.2)
   mkdir -p "$_INI_CH"
   printf 'line1\nLOCAL\n' > "$_INI_CH/CLAUDE.md"
-  _ini_lib '_init_prompt_file_conflict() { :; }; set +e; cmd_init --remote "'"$_INI_REMOTE"'"' >/dev/null
+  local out
+  out="$(_ini_lib '
+    _has_tty() { return 0; }
+    _select_menu() { printf 1; }
+    _select_multi() { printf ""; }
+    _read_tty() { printf "%s" "${2:-}"; }
+    _init_read_choice() { printf l; }
+    set +e
+    cmd_init --remote "'"$_INI_REMOTE"'"')"
+  assert_contains "$out" "Conflict: CLAUDE.md" "INI: conflict prompt shown"
+  assert_eq "0" "$(grep -c 'bad substitution' <<< "$out")" "INI: conflict prompt works on bash 3.2"
 
   assert_eq "LOCAL" "$(git -C "$_INI_REMOTE" show main:CLAUDE.md 2>/dev/null | tail -1)" \
     "INI: LOCAL choice reaches the remote"
   assert_eq "LOCAL" "$(tail -1 "$_INI_CH/CLAUDE.md")" "INI: LOCAL choice kept on disk"
+  rm -rf "$_INI_HOME"
+}
+
+run_test_ini_conflicts_remote_side() {
+  _ini_setup
+  local a="$_INI_HOME/a" out
+  # Machine A pushes a settings.json with its own paths, and a CLAUDE.md
+  mkdir -p "$a/.claude"
+  printf '{"hook":"%s/.claude/hooks/x.sh"}\n' "$a" > "$a/.claude/settings.json"
+  printf 'from A\n' > "$a/.claude/CLAUDE.md"
+  HOME="$a" ZDOTDIR="$a" CLAUDE_HOME="$a/.claude" XDG_STATE_HOME="$a/.state" KITSYNC_NO_TTY=1 \
+    KITSYNC_ROOT="" bash "$_PROJECT_ROOT/bin/claude-kitsync" init --remote "$_INI_REMOTE" </dev/null >/dev/null 2>&1
+
+  # Machine B: same settings (its own paths), different CLAUDE.md, no terminal
+  mkdir -p "$_INI_CH"
+  printf '{"hook":"%s/.claude/hooks/x.sh"}\n' "$_INI_HOME" > "$_INI_CH/settings.json"
+  printf 'from B\n' > "$_INI_CH/CLAUDE.md"
+  out="$(_ini_cli init --remote "$_INI_REMOTE")"
+
+  assert_eq "0" "$(grep -c 'Conflict: settings.json' <<< "$out")" \
+    "INI: same settings on two machines is not a conflict (path tokens)"
+  assert_contains "$out" "Conflict: CLAUDE.md" "INI: real difference reported"
+  assert_eq "from A" "$(cat "$_INI_CH/CLAUDE.md")" "INI: no terminal, remote version wins"
+  assert_eq "from B" "$(cat "$_INI_CH"/.kitsync/backups/init-*/CLAUDE.md 2>/dev/null)" \
+    "INI: local version backed up before the remote replaces it"
+  assert_contains "$out" "--- remote: CLAUDE.md" "INI: diff labels the remote side"
   rm -rf "$_INI_HOME"
 }
 
@@ -135,6 +172,7 @@ run_init_tests() {
   run_test_ini_no_kit_without_tty
   run_test_ini_replaces_open_gitignore
   run_test_ini_local_choice_survives_push
+  run_test_ini_conflicts_remote_side
   run_test_ini_gh_url_protocol
   run_test_ini_push_error_shown
 }
