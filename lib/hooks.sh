@@ -26,7 +26,7 @@ _hook_command() {
 #   remove  remove every kitsync entry; prints "changed" when something went
 _hooks_py() {
   local push
-  push="$(grep '^KITSYNC_PUSH_MODE=' "$CLAUDE_HOME/.kitsync/config" 2>/dev/null | cut -d= -f2- || true)"
+  push="$(_cfg_get KITSYNC_PUSH_MODE || true)"
   KS_MARK="$KITSYNC_HOOK_MARK" KS_PUSH="${push:-end_of_session}" \
   KS_START="$(_hook_command session-start)" KS_END="$(_hook_command session-end)" \
   KS_STOP="$(_hook_command stop)" \
@@ -200,9 +200,7 @@ _json_str() {
   printf '"%s"' "$s"
 }
 
-_hook_cfg() {
-  grep "^$1=" "$CLAUDE_HOME/.kitsync/config" 2>/dev/null | cut -d= -f2- || true
-}
+_hook_cfg() { _cfg_get "$1"; }
 
 cmd_hook() {
   local ev="${1:-}"

@@ -116,11 +116,11 @@ _settings_sync() {
   local cfg="$CLAUDE_HOME/.kitsync/config"
   if [[ -f "$cfg" ]]; then
     local pull_mode push_mode push_timer push_items pull_items
-    pull_mode="$(grep '^KITSYNC_PULL_MODE=' "$cfg" 2>/dev/null | cut -d= -f2- || echo auto)"
-    push_mode="$(grep '^KITSYNC_PUSH_MODE=' "$cfg" 2>/dev/null | cut -d= -f2- || echo end_of_session)"
-    push_timer="$(grep '^KITSYNC_PUSH_TIMER=' "$cfg" 2>/dev/null | cut -d= -f2- || echo 15)"
-    push_items="$(grep '^KITSYNC_PUSH_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2- || echo 'all')"
-    pull_items="$(grep '^KITSYNC_PULL_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2- || echo 'all')"
+    pull_mode="$(_cfg_get KITSYNC_PULL_MODE)"; pull_mode="${pull_mode:-auto}"
+    push_mode="$(_cfg_get KITSYNC_PUSH_MODE)"; push_mode="${push_mode:-end_of_session}"
+    push_timer="$(_cfg_get KITSYNC_PUSH_TIMER)"; push_timer="${push_timer:-15}"
+    push_items="$(_cfg_get KITSYNC_PUSH_ITEMS)"; push_items="${push_items:-all}"
+    pull_items="$(_cfg_get KITSYNC_PULL_ITEMS)"; pull_items="${pull_items:-all}"
     printf "\n" >&2
     log_info "Current: pull=$pull_mode  push=${push_mode}$( [[ "$push_mode" == "timer" ]] && printf " (every %sm)" "$push_timer" || true)"
     log_info "Push items: ${push_items:-all}  |  Pull items: ${pull_items:-all}"
@@ -223,9 +223,9 @@ _settings_about() {
       local cfg="$CLAUDE_HOME/.kitsync/config"
       if [[ -f "$cfg" ]]; then
         local pull_mode push_mode push_timer
-        pull_mode="$(grep '^KITSYNC_PULL_MODE=' "$cfg" 2>/dev/null | cut -d= -f2- || echo auto)"
-        push_mode="$(grep '^KITSYNC_PUSH_MODE=' "$cfg" 2>/dev/null | cut -d= -f2- || echo end_of_session)"
-        push_timer="$(grep '^KITSYNC_PUSH_TIMER=' "$cfg" 2>/dev/null | cut -d= -f2- || echo 15)"
+        pull_mode="$(_cfg_get KITSYNC_PULL_MODE)"; pull_mode="${pull_mode:-auto}"
+        push_mode="$(_cfg_get KITSYNC_PUSH_MODE)"; push_mode="${push_mode:-end_of_session}"
+        push_timer="$(_cfg_get KITSYNC_PUSH_TIMER)"; push_timer="${push_timer:-15}"
         log_info "Pull mode:   $pull_mode"
         if [[ "$push_mode" == "timer" ]]; then
           log_info "Push mode:   $push_mode (every ${push_timer}m)"
@@ -259,7 +259,7 @@ _settings_about() {
 _settings_upgrade() {
   local cfg="$CLAUDE_HOME/.kitsync/config"
   local current
-  current="$(grep '^KITSYNC_UPGRADE_CHANNEL=' "$cfg" 2>/dev/null | cut -d= -f2- || true)"
+  current="$(_cfg_get KITSYNC_UPGRADE_CHANNEL || true)"
   [[ -z "$current" ]] && current="stable"
 
   local choice
@@ -276,11 +276,7 @@ _settings_upgrade() {
   esac
 
   mkdir -p "$(dirname "$cfg")"
-  if grep -q '^KITSYNC_UPGRADE_CHANNEL=' "$cfg" 2>/dev/null; then
-    _sed_inplace "s|^KITSYNC_UPGRADE_CHANNEL=.*|KITSYNC_UPGRADE_CHANNEL=$new_channel|" "$cfg"
-  else
-    printf 'KITSYNC_UPGRADE_CHANNEL=%s\n' "$new_channel" >> "$cfg"
-  fi
+  _config_set KITSYNC_UPGRADE_CHANNEL "$new_channel"
   log_success "Upgrade channel set to: $new_channel"
 }
 

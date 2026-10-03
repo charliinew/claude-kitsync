@@ -34,10 +34,10 @@ claude() {
 
   # Load sync preferences (defaults: auto pull, end-of-session push)
   local _ks_pull="auto" _ks_push="end_of_session" _ks_timer="15" _v
-  if [[ -f "$_ks_cfg" ]]; then
-    _v="$(grep '^KITSYNC_PULL_MODE=' "$_ks_cfg" 2>/dev/null | cut -d= -f2-)" && [[ -n "$_v" ]] && _ks_pull="$_v"
-    _v="$(grep '^KITSYNC_PUSH_MODE=' "$_ks_cfg" 2>/dev/null | cut -d= -f2-)" && [[ -n "$_v" ]] && _ks_push="$_v"
-    _v="$(grep '^KITSYNC_PUSH_TIMER=' "$_ks_cfg" 2>/dev/null | cut -d= -f2-)" && [[ -n "$_v" ]] && _ks_timer="$_v"
+  if [[ -f "$_ks_cfg" || -f "$_ks_home/.kitsync/local" ]]; then
+    _v="$(grep -h '^KITSYNC_PULL_MODE=' "$_ks_home/.kitsync/local" "$_ks_cfg" 2>/dev/null | head -1 | cut -d= -f2-)" && [[ -n "$_v" ]] && _ks_pull="$_v"
+    _v="$(grep -h '^KITSYNC_PUSH_MODE=' "$_ks_home/.kitsync/local" "$_ks_cfg" 2>/dev/null | head -1 | cut -d= -f2-)" && [[ -n "$_v" ]] && _ks_push="$_v"
+    _v="$(grep -h '^KITSYNC_PUSH_TIMER=' "$_ks_home/.kitsync/local" "$_ks_cfg" 2>/dev/null | head -1 | cut -d= -f2-)" && [[ -n "$_v" ]] && _ks_timer="$_v"
   fi
   [[ "$_ks_timer" =~ ^[0-9]+$ ]] && [[ "$_ks_timer" -gt 0 ]] || _ks_timer=15
 

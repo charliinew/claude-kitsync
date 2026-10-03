@@ -19,7 +19,7 @@ _claude_kitsync() {
       case "$prev" in
         -m) return 0 ;;
       esac
-      COMPREPLY=($(compgen -W "-m --auto -n --dry-run" -- "$cur"))
+      COMPREPLY=($(compgen -W "-m --auto -n --dry-run --allow-secret" -- "$cur"))
       ;;
     pull)
       COMPREPLY=($(compgen -W "--force" -- "$cur"))

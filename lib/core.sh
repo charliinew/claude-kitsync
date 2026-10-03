@@ -101,18 +101,73 @@ _has_tty() {
 }
 
 # ---------------------------------------------------------------------------
-# _config_set <key> <value> — set one key in .kitsync/config, keeping the rest
-# (the file also holds profiles, encryption and the upgrade channel)
+# Preferences live in two files under .kitsync/:
+#   config  synced — what every machine must agree on (encryption, profiles)
+#   local   never synced — this machine's choices (modes, categories, timer,
+#           upgrade channel); a work laptop can sync less than a personal one
 # ---------------------------------------------------------------------------
+KITSYNC_LOCAL_KEYS="KITSYNC_PULL_MODE KITSYNC_PUSH_MODE KITSYNC_PUSH_TIMER KITSYNC_PUSH_ITEMS KITSYNC_PULL_ITEMS KITSYNC_UPGRADE_CHANNEL"
+
+_is_local_key() { [[ " $KITSYNC_LOCAL_KEYS " == *" $1 "* ]]; }
+
+# _cfg_file <key> — the file that holds <key>
+_cfg_file() {
+  if _is_local_key "$1"; then
+    printf '%s/.kitsync/local' "$CLAUDE_HOME"
+  else
+    printf '%s/.kitsync/config' "$CLAUDE_HOME"
+  fi
+}
+
+# _cfg_get <key> — value of <key> (empty if unset). A local key still found
+# only in the synced file (setup older than 1.2.1) is read from there.
+_cfg_get() {
+  local v
+  v="$(grep "^$1=" "$(_cfg_file "$1")" 2>/dev/null | tail -1 | cut -d= -f2-)" || true
+  if [[ -z "$v" ]] && _is_local_key "$1"; then
+    v="$(grep "^$1=" "$CLAUDE_HOME/.kitsync/config" 2>/dev/null | tail -1 | cut -d= -f2-)" || true
+  fi
+  printf '%s' "$v"
+}
+
+# _config_set <key> <value> — set one key in the file it belongs to, keeping the rest
 _config_set() {
-  local cfg="$CLAUDE_HOME/.kitsync/config" tmp
+  local cfg tmp
+  cfg="$(_cfg_file "$1")"
   mkdir -p "$(dirname "$cfg")"
-  [[ -f "$cfg" ]] || printf '# claude-kitsync sync preferences\n# Edit manually or run: claude-kitsync settings\n' > "$cfg"
+  if [[ ! -f "$cfg" ]]; then
+    if _is_local_key "$1"; then
+      printf '# claude-kitsync — preferences of this machine (never synced)\n# Edit manually or run: claude-kitsync settings\n' > "$cfg"
+    else
+      printf '# claude-kitsync — shared by all your machines\n' > "$cfg"
+    fi
+  fi
   tmp="$(mktemp "${cfg}.XXXXXX")"
   grep -v "^$1=" "$cfg" > "$tmp" || true
   printf '%s=%s\n' "$1" "$2" >> "$tmp"
   mv "$tmp" "$cfg"
 }
+
+# _config_migrate_local — move this machine's keys out of the synced file
+# (each machine keeps the values it had). Returns 0 when the synced file changed.
+_config_migrate_local() {
+  local cfg="$CLAUDE_HOME/.kitsync/config" key val moved=1
+  [[ -f "$cfg" ]] || return 1
+  for key in $KITSYNC_LOCAL_KEYS; do
+    grep -q "^$key=" "$cfg" 2>/dev/null || continue
+    val="$(grep "^$key=" "$cfg" | tail -1 | cut -d= -f2-)"
+    grep -q "^$key=" "$CLAUDE_HOME/.kitsync/local" 2>/dev/null || _config_set "$key" "$val"
+    moved=0
+  done
+  [[ $moved -eq 0 ]] || return 1
+  local tmp
+  tmp="$(mktemp "${cfg}.XXXXXX")"
+  grep -vE "^($(tr ' ' '|' <<< "$KITSYNC_LOCAL_KEYS"))=" "$cfg" > "$tmp" || true
+  sed -i.bak 's/^# claude-kitsync sync preferences$/# claude-kitsync — shared by all your machines (per-machine choices: .kitsync\/local)/' "$tmp" && rm -f "$tmp.bak"
+  mv "$tmp" "$cfg"
+  return 0
+}
+
 
 # ---------------------------------------------------------------------------
 # _with_timeout <seconds> <cmd...> — timeout(1) is missing on stock macOS

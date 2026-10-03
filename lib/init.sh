@@ -416,10 +416,10 @@ _prompt_sync_preferences() {
   local cfg="$CLAUDE_HOME/.kitsync/config"
 
   # Re-run: offer to keep what is there (without a terminal, keep it)
-  if grep -q '^KITSYNC_PULL_MODE=' "$cfg" 2>/dev/null; then
+  if [[ -n "$(_cfg_get KITSYNC_PULL_MODE)" ]]; then
     local _cur_pull_mode _cur_push_mode
-    _cur_pull_mode="$(grep '^KITSYNC_PULL_MODE=' "$cfg" | cut -d= -f2-)"
-    _cur_push_mode="$(grep '^KITSYNC_PUSH_MODE=' "$cfg" 2>/dev/null | cut -d= -f2- || true)"
+    _cur_pull_mode="$(_cfg_get KITSYNC_PULL_MODE)"
+    _cur_push_mode="$(_cfg_get KITSYNC_PUSH_MODE || true)"
     local keep
     keep="$(_select_menu "Sync preferences already set (pull: ${_cur_pull_mode}, push: ${_cur_push_mode:-?})" \
       "Keep them" \
@@ -463,8 +463,8 @@ _prompt_sync_preferences() {
 
   # --- Sync items (which categories to push / pull) ---
   local _cur_push _cur_pull
-  _cur_push="$(grep '^KITSYNC_PUSH_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2- || true)"
-  _cur_pull="$(grep '^KITSYNC_PULL_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2- || true)"
+  _cur_push="$(_cfg_get KITSYNC_PUSH_ITEMS || true)"
+  _cur_pull="$(_cfg_get KITSYNC_PULL_ITEMS || true)"
 
   printf "\n"
   local push_items

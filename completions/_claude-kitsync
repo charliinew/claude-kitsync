@@ -40,6 +40,7 @@ _claude_kitsync() {
             '(-m)-m[Commit message]:message:' \
             '--auto[Non-interactive mode, suppress output]' \
             '(-n --dry-run)'{-n,--dry-run}'[Preview what would be committed without committing]' \
+            '--allow-secret[Push this file even if it looks like it holds a secret]:file:_files' \
           ;;
         pull)
           _arguments \

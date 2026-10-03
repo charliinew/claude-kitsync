@@ -41,6 +41,7 @@
 .kitsync/pending-notice
 .kitsync/conflict_pending
 .kitsync/sync-warning
+.kitsync/local
 .kitsync/*.tmp.*
 
 # JAMAIS syncé (explicite) — these override the !*/ rule above

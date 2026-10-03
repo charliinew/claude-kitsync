@@ -48,7 +48,7 @@ run_test_ini_rerun_keeps_config() {
   assert_contains "$(cat "$cfg")" "KITSYNC_ENCRYPT=true" "INI: re-run keeps the encryption flag"
   assert_contains "$(cat "$cfg")" "KITSYNC_UPGRADE_CHANNEL=dev" "INI: re-run keeps the upgrade channel"
   assert_contains "$(cat "$cfg")" "KITSYNC_PROFILES_WORK_URL=" "INI: re-run keeps other profiles"
-  assert_eq "1" "$(grep -c '^KITSYNC_PULL_MODE=' "$cfg")" "INI: re-run keeps a single pull mode"
+  assert_eq "1" "$(grep -c '^KITSYNC_PULL_MODE=' "$_INI_CH/.kitsync/local")" "INI: re-run keeps a single pull mode"
   rm -rf "$_INI_HOME"
 }
 

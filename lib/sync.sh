@@ -63,6 +63,7 @@ _gitignore_migrate() {
     ".kitsync/pending-notice"
     ".kitsync/conflict_pending"
     ".kitsync/sync-warning"
+    ".kitsync/local"
     ".kitsync/*.tmp.*"
     "skills/synced/"
   )
@@ -108,6 +109,12 @@ _sync_prepare_repo() {
     git -C "$CLAUDE_HOME" add -- .kitsync/config 2>/dev/null && \
       git -C "$CLAUDE_HOME" commit -q -m "kitsync: track sync preferences" -- .kitsync/config 2>/dev/null || true
   fi
+  # 1.2.1: per-machine choices move to the never-synced .kitsync/local
+  if _config_migrate_local && \
+     git -C "$CLAUDE_HOME" ls-files --error-unmatch .kitsync/config &>/dev/null; then
+    git -C "$CLAUDE_HOME" commit -q -m "kitsync: keep per-machine preferences out of sync" \
+      -- .kitsync/config 2>/dev/null || true
+  fi
   if _crypto_is_enabled 2>/dev/null; then
     _crypto_gitignore_block add 2>/dev/null || true
     git -C "$CLAUDE_HOME" rm --cached -q --ignore-unmatch \
@@ -117,9 +124,8 @@ _sync_prepare_repo() {
 
 # Returns comma-separated push categories from config, or all if unset
 _sync_get_push_items() {
-  local cfg="$CLAUDE_HOME/.kitsync/config"
   local raw
-  raw="$(grep '^KITSYNC_PUSH_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2- || true)"
+  raw="$(_cfg_get KITSYNC_PUSH_ITEMS || true)"
   if [[ -z "$raw" ]]; then
     local IFS=","; echo "${SYNC_USER_CATEGORIES[*]}"
   else
@@ -129,9 +135,8 @@ _sync_get_push_items() {
 
 # Returns comma-separated pull categories from config, or all if unset
 _sync_get_pull_items() {
-  local cfg="$CLAUDE_HOME/.kitsync/config"
   local raw
-  raw="$(grep '^KITSYNC_PULL_ITEMS=' "$cfg" 2>/dev/null | cut -d= -f2- || true)"
+  raw="$(_cfg_get KITSYNC_PULL_ITEMS || true)"
   if [[ -z "$raw" ]]; then
     local IFS=","; echo "${SYNC_USER_CATEGORIES[*]}"
   else
@@ -199,18 +204,66 @@ _markers() {
   "$@" 2>/dev/null | grep -cE '^(<<<<<<<|>>>>>>>)( |$)' || true
 }
 
+# Secret formats worth stopping a push for (name|extended regex)
+_SYNC_SECRET_PATTERNS=(
+  'Anthropic API key|sk-ant-[A-Za-z0-9_-]{20,}'
+  'OpenAI API key|sk-(proj-)?[A-Za-z0-9_-]{32,}'
+  'GitHub token|gh[pousr]_[A-Za-z0-9]{36}'
+  'GitHub token|github_pat_[A-Za-z0-9_]{50,}'
+  'AWS access key|AKIA[0-9A-Z]{16}'
+  'Slack token|xox[abprs]-[A-Za-z0-9-]{10,}'
+  'Google API key|AIza[0-9A-Za-z_-]{35}'
+  'Private key|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+)
+
+# _sync_secret_in <file> — name of the first secret format found in the lines
+# this commit adds to <file> (staged diff), empty if none
+_sync_secret_in() {
+  local added entry
+  added="$(git -C "$CLAUDE_HOME" diff --cached -U0 -- "$1" 2>/dev/null | grep '^+' | grep -v '^+++' || true)"
+  [[ -n "$added" ]] || return 0
+  for entry in "${_SYNC_SECRET_PATTERNS[@]}"; do
+    if grep -qE -- "${entry#*|}" <<< "$added"; then
+      printf '%s' "${entry%%|*}"
+      return 0
+    fi
+  done
+}
+
+# _sync_secret_allowed <file> — listed in .kitsync/allow-secrets (synced)
+_sync_secret_allowed() {
+  grep -qxF -- "$1" "$CLAUDE_HOME/.kitsync/allow-secrets" 2>/dev/null
+}
+
+# _sync_allow_secret <path> — `push --allow-secret <path>`
+_sync_allow_secret() {
+  local f="${1:-}"
+  [[ -n "$f" ]] || die "Usage: claude-kitsync push --allow-secret <path relative to $CLAUDE_HOME>"
+  f="${f#"$CLAUDE_HOME"/}"
+  mkdir -p "$CLAUDE_HOME/.kitsync"
+  _sync_secret_allowed "$f" || printf '%s\n' "$f" >> "$CLAUDE_HOME/.kitsync/allow-secrets"
+  log_info "Secrets in $f will be pushed (listed in .kitsync/allow-secrets)."
+}
+
 # ---------------------------------------------------------------------------
-# _sync_unstage_broken — never commit a half-merged file: conflict markers that
-# the committed version did not have (docs may show markers on purpose), or a
-# settings.json that is not valid JSON. Those files are unstaged with a
-# warning; everything else is still pushed.
+# _sync_unstage_unsafe [dry] — leave out of the commit, with a warning:
+#   - half-merged files: conflict markers the committed version did not have
+#     (docs may show markers on purpose)
+#   - a settings.json that is not valid JSON
+#   - files that add something shaped like a secret (unless allowed)
+# Everything else is still pushed. Sets _SYNC_LEFT_OUT ("file (reason)" lines).
+# With "dry", nothing is recorded for the next session.
 # ---------------------------------------------------------------------------
-_sync_unstage_broken() {
-  local f bad=""
+_SYNC_LEFT_OUT=""
+_sync_unstage_unsafe() {
+  local dry="${1:-}" f secret out=""
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
     if (( $(_markers git -C "$CLAUDE_HOME" show ":$f") > $(_markers git -C "$CLAUDE_HOME" show "HEAD:$f") )); then
-      bad="$bad $f"
+      out+="$f (unresolved merge)"$'\n'
+    elif ! _sync_secret_allowed "$f"; then
+      secret="$(_sync_secret_in "$f")"
+      [[ -z "$secret" ]] || out+="$f (looks like a secret: $secret)"$'\n'
     fi
   done < <(git -C "$CLAUDE_HOME" diff --cached --name-only --diff-filter=AM 2>/dev/null)
 
@@ -218,16 +271,23 @@ _sync_unstage_broken() {
   if [[ -f "$CLAUDE_HOME/settings.json" ]] && command -v python3 &>/dev/null && \
      ! python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$CLAUDE_HOME/settings.json" 2>/dev/null; then
     for f in settings.json settings.json.enc; do
-      git -C "$CLAUDE_HOME" diff --cached --quiet -- "$f" 2>/dev/null || bad="$bad $f"
+      git -C "$CLAUDE_HOME" diff --cached --quiet -- "$f" 2>/dev/null || out+="$f (invalid JSON)"$'\n'
     done
   fi
 
-  [[ -n "$bad" ]] || return 0
-  for f in $bad; do
-    git -C "$CLAUDE_HOME" reset -q -- "$f" 2>/dev/null || true
-  done
-  log_warn "Not pushed — unresolved merge or invalid JSON in:$bad"
-  _sync_warn_next_launch "Not pushed — fix these files, then run claude-kitsync push:$bad"
+  _SYNC_LEFT_OUT="$out"
+  [[ -n "$out" ]] || return 0
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && git -C "$CLAUDE_HOME" reset -q -- "${f% (*}" 2>/dev/null || true
+  done <<< "$out"
+  [[ "$dry" == dry ]] && return 0
+  local list
+  list="$(printf '%s' "$out" | tr '\n' ';' | sed 's/;$//; s/;/; /g')"
+  log_warn "Not pushed: $list"
+  if grep -q 'looks like a secret' <<< "$out"; then
+    log_info "  Move the secret out, encrypt settings.json (claude-kitsync encrypt enable), or allow it: claude-kitsync push --allow-secret <file>"
+  fi
+  _sync_warn_next_launch "Not pushed: $list — fix, then run claude-kitsync push"
 }
 
 # ---------------------------------------------------------------------------
@@ -392,19 +452,23 @@ sync_pull() {
 # shared by pull and pull --auto
 # ---------------------------------------------------------------------------
 _sync_after_pull() {
-  local pre="$1" quiet="${2:-}" items cat path
+  local pre="$1" quiet="${2:-}" items cat path f kept
   items="$(_sync_get_pull_items)"
   if [[ -n "$pre" ]]; then
     for cat in "${SYNC_USER_CATEGORIES[@]}"; do
       _sync_item_in_list "$cat" "$items" && continue
       path="$(_sync_category_to_path "$cat")"
-      if [[ -e "$CLAUDE_HOME/$path" ]] && \
-         ! git -C "$CLAUDE_HOME" diff --quiet "$pre" HEAD -- "$path" 2>/dev/null; then
-        # Restore working tree + index to pre-pull version, then unstage
-        git -C "$CLAUDE_HOME" checkout "$pre" -- "$path" 2>/dev/null || true
-        git -C "$CLAUDE_HOME" reset -q HEAD -- "$path" 2>/dev/null || true
-        [[ -n "$quiet" ]] || log_info "Selective pull: kept local ${cat} (not in pull selection)"
-      fi
+      # File by file: only what the pull changed goes back to its pre-pull
+      # version — a local edit the pull didn't touch is never overwritten
+      kept=false
+      while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        git -C "$CLAUDE_HOME" cat-file -e "$pre:$f" 2>/dev/null || continue
+        git -C "$CLAUDE_HOME" checkout "$pre" -- "$f" 2>/dev/null || true
+        git -C "$CLAUDE_HOME" reset -q HEAD -- "$f" 2>/dev/null || true
+        kept=true
+      done < <(git -C "$CLAUDE_HOME" diff --name-only "$pre" HEAD -- "$path" 2>/dev/null)
+      [[ "$kept" == true && -z "$quiet" ]] && log_info "Selective pull: kept local ${cat} (not in pull selection)"
     done
   fi
   crypto_decrypt_all 2>/dev/null || true
@@ -428,7 +492,6 @@ _sync_pull_auto() {
   local gd
   gd="$(git -C "$CLAUDE_HOME" rev-parse --absolute-git-dir 2>/dev/null)"
   [[ -d "$gd/rebase-merge" || -d "$gd/rebase-apply" || -f "$gd/MERGE_HEAD" ]] && return 0
-  _is_dirty && return 0
 
   local branch pre
   branch="$(git -C "$CLAUDE_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
@@ -439,8 +502,22 @@ _sync_pull_auto() {
 
   _sync_prepare_repo
   pre="$(git -C "$CLAUDE_HOME" rev-parse HEAD 2>/dev/null || true)"
+
+  # Local edits not pushed yet (files excluded from push, a session still
+  # running…): skip only if the remote changed one of the same files. Other
+  # edits are set aside and put back — the remote didn't touch them, so they
+  # can't conflict (a blanket skip would block pulls forever).
+  local dirty overlap stash=""
+  dirty="$(git -C "$CLAUDE_HOME" diff --name-only HEAD 2>/dev/null || true)"
+  if [[ -n "$dirty" ]]; then
+    overlap="$(comm -12 <(sort <<< "$dirty") \
+      <(git -C "$CLAUDE_HOME" diff --name-only HEAD "origin/$branch" 2>/dev/null | sort))"
+    [[ -z "$overlap" ]] || return 0
+    stash="--autostash"
+  fi
+
   # -X ours = remote wins (a rebase swaps sides)
-  if git -C "$CLAUDE_HOME" rebase -q -X ours "origin/$branch" &>/dev/null; then
+  if git -C "$CLAUDE_HOME" rebase -q -X ours ${stash:+"$stash"} "origin/$branch" &>/dev/null; then
     rm -f "$CLAUDE_HOME/.kitsync/conflict_pending" 2>/dev/null || true
     if [[ "$pre" != "$(git -C "$CLAUDE_HOME" rev-parse HEAD 2>/dev/null)" ]]; then
       _sync_after_pull "$pre" quiet
@@ -456,6 +533,109 @@ _sync_pull_auto() {
     printf 'files:%s\n' "$files" > "$CLAUDE_HOME/.kitsync/conflict_pending" 2>/dev/null || true
   fi
   return 0
+}
+
+# ---------------------------------------------------------------------------
+# _sync_stage — encrypt (when enabled), refresh the template, and stage the
+# allowlist filtered by the push selection — deletions included
+# ---------------------------------------------------------------------------
+_sync_stage() {
+  if _crypto_is_enabled 2>/dev/null; then
+    crypto_encrypt_all >/dev/null 2>&1 || true
+  fi
+
+  # Keep settings.template.json in sync with settings.json (plaintext only —
+  # under encryption the template is ignored and untracked).
+  local items
+  items="$(_sync_get_push_items)"
+  if ! _crypto_is_enabled 2>/dev/null && \
+     [[ -f "$CLAUDE_HOME/settings.template.json" ]] && [[ -f "$CLAUDE_HOME/settings.json" ]] && \
+     _sync_item_in_list "settings.json" "$items"; then
+    paths_tokenize_stream < "$CLAUDE_HOME/settings.json" > "$CLAUDE_HOME/settings.template.json" 2>/dev/null || true
+  fi
+
+  local item
+  for item in "${SYNC_WHITELIST[@]}"; do
+    # Infrastructure items always staged; user categories filtered by config
+    if ! _sync_is_infra "$item"; then
+      _sync_item_in_list "${item%/}" "$items" || continue
+    fi
+    # Under encryption the plaintext is ignored: stage its .enc instead
+    if _crypto_is_enabled 2>/dev/null && [[ -f "$CLAUDE_HOME/${item}.enc" ]]; then
+      git -C "$CLAUDE_HOME" add -A -- "${item}.enc" 2>/dev/null || true
+      continue
+    fi
+    # -A: a deleted file or folder is pushed as a deletion too (git errors
+    # harmlessly on a path that neither exists nor is tracked)
+    git -C "$CLAUDE_HOME" add -A -- "$item" 2>/dev/null || true
+  done
+
+  # Re-run the path-token clean filter even if git's stat cache thinks
+  # settings.json is unchanged (first push after the filter was configured)
+  if ! _crypto_is_enabled 2>/dev/null && _sync_item_in_list "settings.json" "$items" && \
+     [[ -f "$CLAUDE_HOME/settings.json" ]]; then
+    git -C "$CLAUDE_HOME" add --renormalize -- settings.json 2>/dev/null || true
+  fi
+
+  # Final safety: verify .credentials.json not staged after add (--name-only = one filename per line)
+  if git -C "$CLAUDE_HOME" diff --cached --name-only 2>/dev/null | grep -q "^\.credentials\.json$"; then
+    log_error "CRITICAL: .credentials.json ended up staged — aborting commit!"
+    git -C "$CLAUDE_HOME" reset HEAD ".credentials.json" 2>/dev/null || true
+    exit 1
+  fi
+}
+
+# _sync_dry_run — what push would commit, without changing anything
+_sync_dry_run() {
+  log_step "Dry run — showing what would be committed"; printf "\n" >&2
+  local gd idx bak f
+  gd="$(git -C "$CLAUDE_HOME" rev-parse --absolute-git-dir)"
+  idx="$(mktemp)"; bak="$(mktemp -d)"
+  cp "$gd/index" "$idx" 2>/dev/null || true
+  for f in settings.json.enc settings.template.json; do
+    [[ -f "$CLAUDE_HOME/$f" ]] && cp -p "$CLAUDE_HOME/$f" "$bak/$f"
+  done
+
+  export GIT_INDEX_FILE="$idx"
+  _sync_stage
+  _sync_unstage_unsafe dry
+  if git -C "$CLAUDE_HOME" diff --cached --quiet 2>/dev/null; then
+    log_info "Nothing to commit — working tree clean for synced files."
+  else
+    git -C "$CLAUDE_HOME" diff --cached --name-status 2>/dev/null | \
+      while IFS=$'\t' read -r _st _file; do
+        case "$_st" in
+          M) log_info "  modified:  $_file" ;;
+          A) log_info "  new file:  $_file" ;;
+          D) log_info "  deleted:   $_file" ;;
+          *) log_info "  $_st         $_file" ;;
+        esac
+      done
+  fi
+  unset GIT_INDEX_FILE
+  if [[ -n "$_SYNC_LEFT_OUT" ]]; then
+    printf "\n" >&2
+    log_warn "Would be left out:"
+    printf '%s' "$_SYNC_LEFT_OUT" | while IFS= read -r f; do [[ -n "$f" ]] && log_warn "  $f"; done
+  fi
+
+  # Put derived files back exactly as they were
+  for f in settings.json.enc settings.template.json; do
+    if [[ -f "$bak/$f" ]]; then
+      cp -p "$bak/$f" "$CLAUDE_HOME/$f"
+    else
+      rm -f "$CLAUDE_HOME/$f"
+    fi
+  done
+  rm -f "$idx" "$bak/settings.json.enc" "$bak/settings.template.json"
+  rmdir "$bak" 2>/dev/null || true
+
+  printf "\n" >&2
+  local url profile
+  url="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || echo 'no remote')"
+  profile="$(_profile_get_active 2>/dev/null || true)"
+  log_info "Would push to:  $url${profile:+  (profile: $profile)}"
+  printf "\n"
 }
 
 # ---------------------------------------------------------------------------
@@ -510,110 +690,18 @@ sync_push() {
     exit 1
   fi
 
-  # Dry-run: stage → preview → reset → exit
+  # Dry run: the real staging, on a throwaway copy of the index; derived files
+  # it writes (settings.json.enc, settings.template.json) are put back after
   if [[ "$_dry_run" == true ]]; then
-    log_step "Dry run — showing what would be committed"; printf "\n" >&2
-    local _dry_push_items
-    _dry_push_items="$(_sync_get_push_items)"
-    for item in "${SYNC_WHITELIST[@]}"; do
-      if ! _sync_is_infra "$item"; then
-        local _dry_cat="${item%/}"
-        _sync_item_in_list "$_dry_cat" "$_dry_push_items" || continue
-      fi
-      local _fp="$CLAUDE_HOME/$item"
-      [[ -e "$_fp" ]] && git -C "$CLAUDE_HOME" add "$_fp" 2>/dev/null || true
-    done
-    if git -C "$CLAUDE_HOME" diff --cached --quiet 2>/dev/null; then
-      log_info "Nothing to commit — working tree clean for synced files."
-    else
-      git -C "$CLAUDE_HOME" diff --cached --name-status 2>/dev/null | \
-        while IFS=$'\t' read -r _st _file; do
-          case "$_st" in
-            M) log_info "  modified:  $_file" ;;
-            A) log_info "  new file:  $_file" ;;
-            D) log_info "  deleted:   $_file" ;;
-            *) log_info "  $_st         $_file" ;;
-          esac
-        done
-      printf "\n"
-      log_info "Commit message: kitsync: sync $(date '+%Y-%m-%d %H:%M')"
-      local _dryrun_url _dryrun_profile
-      _dryrun_url="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || echo 'no remote')"
-      _dryrun_profile="$(_profile_get_active 2>/dev/null || true)"
-      if [[ -n "$_dryrun_profile" ]]; then
-        log_info "Would push to:  $_dryrun_url  (profile: $_dryrun_profile)"
-      else
-        log_info "Would push to:  $_dryrun_url"
-      fi
-    fi
-    git -C "$CLAUDE_HOME" reset HEAD -- . 2>/dev/null || true
-    printf "\n"
+    _sync_dry_run
     return 0
   fi
 
   # Filter/gitignore maintenance — after the dry-run exit so a preview never mutates the repo
   _sync_prepare_repo
-
-  # Encrypt sensitive files before staging (when enabled)
-  local _enc_staged_files=()
-  if _crypto_is_enabled 2>/dev/null; then
-    local _enc_out
-    while IFS= read -r _enc_out; do
-      [[ -n "$_enc_out" ]] && _enc_staged_files+=("$_enc_out")
-    done < <(crypto_encrypt_all 2>/dev/null || true)
-  fi
-
-  # Keep settings.template.json in sync with settings.json (plaintext only —
-  # under encryption the template is ignored and untracked).
-  if ! _crypto_is_enabled 2>/dev/null && \
-     [[ -f "$CLAUDE_HOME/settings.template.json" ]] && [[ -f "$CLAUDE_HOME/settings.json" ]] && \
-     _sync_item_in_list "settings.json" "$(_sync_get_push_items)"; then
-    paths_tokenize_stream < "$CLAUDE_HOME/settings.json" > "$CLAUDE_HOME/settings.template.json" 2>/dev/null || true
-  fi
-
   _plog_step "Staging whitelisted files..."
-
-  # Stage only whitelisted paths (paths that exist)
-  # When encryption is enabled, skip plaintext settings.json — stage .enc instead
-  local _push_items
-  _push_items="$(_sync_get_push_items)"
-  local staged_count=0
-  for item in "${SYNC_WHITELIST[@]}"; do
-    # Infrastructure items always staged; user categories filtered by config
-    if ! _sync_is_infra "$item"; then
-      local _push_cat="${item%/}"
-      _sync_item_in_list "$_push_cat" "$_push_items" || continue
-    fi
-    local full_path="$CLAUDE_HOME/$item"
-    # Skip plaintext file if its encrypted version was produced
-    if _crypto_is_enabled 2>/dev/null; then
-      local _enc_path="$CLAUDE_HOME/${item}.enc"
-      if [[ -f "$_enc_path" ]]; then
-        git -C "$CLAUDE_HOME" add "$_enc_path" 2>/dev/null || true
-        staged_count=$((staged_count + 1))
-        continue
-      fi
-    fi
-    if [[ -e "$full_path" ]]; then
-      git -C "$CLAUDE_HOME" add "$full_path" 2>/dev/null || true
-      staged_count=$((staged_count + 1))
-    fi
-  done
-
-  # Re-run the path-token clean filter even if git's stat cache thinks
-  # settings.json is unchanged (first push after the filter was configured)
-  if ! _crypto_is_enabled 2>/dev/null && _sync_item_in_list "settings.json" "$_push_items"; then
-    git -C "$CLAUDE_HOME" add --renormalize -- settings.json 2>/dev/null || true
-  fi
-
-  # Final safety: verify .credentials.json not staged after add (--name-only = one filename per line)
-  if git -C "$CLAUDE_HOME" diff --cached --name-only 2>/dev/null | grep -q "^\.credentials\.json$"; then
-    log_error "CRITICAL: .credentials.json ended up staged — aborting commit!"
-    git -C "$CLAUDE_HOME" reset HEAD ".credentials.json" 2>/dev/null || true
-    exit 1
-  fi
-
-  _sync_unstage_broken
+  _sync_stage
+  _sync_unstage_unsafe
 
   # Check if there is anything to commit — local commits not yet pushed
   # (earlier failed push, path-token migration) still need to go out

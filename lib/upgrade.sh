@@ -280,7 +280,7 @@ cmd_upgrade() {
   # Check config for dev channel if flag not set
   if [[ "$_dev_mode" != true ]]; then
     local _channel
-    _channel="$(grep '^KITSYNC_UPGRADE_CHANNEL=' "$CLAUDE_HOME/.kitsync/config" 2>/dev/null | cut -d= -f2- || true)"
+    _channel="$(_cfg_get KITSYNC_UPGRADE_CHANNEL || true)"
     [[ "$_channel" == "dev" ]] && _dev_mode=true
   fi
 

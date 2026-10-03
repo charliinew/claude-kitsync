@@ -62,9 +62,8 @@ run_test_as_pull_keeps_uncommitted() {
 run_test_as_pull_applies_and_filters() {
   _as_setup
   # B does not pull CLAUDE.md
-  local cfg="$_AS_B/.claude/.kitsync/config"
+  local cfg="$_AS_B/.claude/.kitsync/local"   # per-machine, never synced
   sed -i.bak 's/^KITSYNC_PULL_ITEMS=.*/KITSYNC_PULL_ITEMS=agents,settings.json/' "$cfg" && rm -f "$cfg.bak"
-  git -C "$_AS_B/.claude" commit -q -am "pull selection"   # as a push would
   printf '{\n  "model": "sonnet"\n}\n' > "$_AS_A/.claude/settings.json"
   printf '# changed on A\n' > "$_AS_A/.claude/CLAUDE.md"
   _as "$_AS_A" push -m remote >/dev/null
