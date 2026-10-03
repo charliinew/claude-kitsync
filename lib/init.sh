@@ -472,6 +472,15 @@ _prompt_sync_preferences() {
   local pull_items
   pull_items="$(_prompt_sync_items "pull" "$_cur_pull")"
 
+  # A category not pulled is never pushed either (it would revert the others)
+  local _c _skip=""
+  for _c in ${push_items//,/ }; do
+    [[ ",$pull_items," == *",$_c,"* ]] || _skip+="$_c "
+  done
+  if [[ -n "$_skip" ]]; then
+    log_info "Not pulled, so not pushed either (it would undo your other machines' changes): ${_skip% }"
+  fi
+
   # Only these keys: the same file holds profiles, encryption, upgrade channel
   _config_set KITSYNC_PULL_MODE "$pull_mode"
   _config_set KITSYNC_PUSH_MODE "$push_mode"

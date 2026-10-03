@@ -313,11 +313,74 @@ _has_remote() {
 }
 
 
+# ---------------------------------------------------------------------------
+# Categories this machine doesn't pull are a local version on purpose: never
+# overwritten by a pull, never pushed (that would revert the other machines),
+# and never in the way of the rest of the sync.
+# ---------------------------------------------------------------------------
+
+# _sync_pull_excluded_paths — allowlist paths of the categories not pulled
+_sync_pull_excluded_paths() {
+  local items cat
+  items="$(_sync_get_pull_items)"
+  for cat in "${SYNC_USER_CATEGORIES[@]}"; do
+    _sync_item_in_list "$cat" "$items" && continue
+    _sync_category_to_path "$cat" | sed 's:/$::'
+    printf '\n'
+    # Under encryption the remote holds settings.json as settings.json.enc
+    [[ "$cat" == settings.json ]] && printf 'settings.json.enc\n'
+  done
+  return 0
+}
+
+# _sync_hold_local — move this machine's version of the non-pulled paths out
+# of the way (into .git/, never synced) and put HEAD's in place, so a rebase
+# neither overwrites nor trips over them. A hold left by an interrupted run is
+# released first.
+_SYNC_HOLD=""
+_sync_hold_local() {
+  local gd p
+  gd="$(git -C "$CLAUDE_HOME" rev-parse --absolute-git-dir)"
+  _SYNC_HOLD="$gd/kitsync-hold"
+  [[ -d "$_SYNC_HOLD" ]] && _sync_release_local
+  _SYNC_HOLD="$gd/kitsync-hold"
+  mkdir -p "$_SYNC_HOLD"
+  while IFS= read -r p; do
+    [[ -n "$p" && "$p" != *..* ]] || continue
+    if [[ -e "$CLAUDE_HOME/$p" ]]; then
+      mkdir -p "$(dirname "$_SYNC_HOLD/$p")"
+      mv "$CLAUDE_HOME/$p" "$_SYNC_HOLD/$p"
+    fi
+    git -C "$CLAUDE_HOME" checkout HEAD -- "$p" 2>/dev/null || true
+  done < <(_sync_pull_excluded_paths)
+}
+
+# _sync_release_local — put the held local version back (whatever the
+# pull brought for those paths is left in git only)
+_sync_release_local() {
+  [[ -n "$_SYNC_HOLD" && -d "$_SYNC_HOLD" ]] || return 0
+  local p
+  while IFS= read -r p; do
+    [[ -n "$p" && "$p" != *..* ]] || continue
+    rm -rf "${CLAUDE_HOME:?}/$p"
+    if [[ -e "$_SYNC_HOLD/$p" ]]; then
+      mkdir -p "$(dirname "$CLAUDE_HOME/$p")"
+      mv "$_SYNC_HOLD/$p" "$CLAUDE_HOME/$p"
+    fi
+  done < <(_sync_pull_excluded_paths)
+  rm -rf "$_SYNC_HOLD"
+  _SYNC_HOLD=""
+}
+
 # _sync_dirty_overlap <branch> — uncommitted local edits to files the remote
 # changed (those can't be set aside and put back without a conflict)
 _sync_dirty_overlap() {
   local dirty
-  dirty="$(git -C "$CLAUDE_HOME" diff --name-only HEAD 2>/dev/null || true)"
+  # Uncommitted edits, and new files not yet pushed (the remote may add the
+  # same path: git would refuse to overwrite it)
+  dirty="$(git -C "$CLAUDE_HOME" diff --name-only HEAD 2>/dev/null || true)
+$(git -C "$CLAUDE_HOME" ls-files --others --exclude-standard 2>/dev/null || true)"
+  dirty="$(grep -v '^$' <<< "$dirty" || true)"
   [[ -n "$dirty" ]] || return 0
   # What the REMOTE changed since the common ancestor — not the local
   # commits that HEAD..origin would also list
@@ -463,6 +526,7 @@ sync_pull() {
 
   _PULL_BACKUP_DIR=""
   _PULL_KEPT_LOCAL=""
+  _sync_hold_local
 
   # Uncommitted edits to files the remote also changed
   local overlap f
@@ -477,8 +541,10 @@ sync_pull() {
     else
       log_warn "You have uncommitted edits to files that also changed on the remote:"
       while IFS= read -r f; do log_warn "  • $f"; done <<< "$overlap"
-      log_info "Push them first (claude-kitsync push), then pull to resolve file by file —"
+      log_info "Push them first (claude-kitsync push), then pull to resolve file by file"
+      log_info "(new files and categories you don't push included) —"
       log_info "or take the remote version: claude-kitsync pull --force (your edits are backed up)."
+      _sync_release_local
       return 1
     fi
   fi
@@ -500,16 +566,18 @@ sync_pull() {
       else
         log_warn "Pull failed — nothing was changed. Check: git -C \"$CLAUDE_HOME\" status"
       fi
+      _sync_release_local
       return 1
     fi
   fi
 
+  _sync_release_local
   rm -f "$CLAUDE_HOME/.kitsync/conflict_pending" 2>/dev/null || true
   if [[ "$pre" == "$(git -C "$CLAUDE_HOME" rev-parse HEAD 2>/dev/null)" ]]; then
     log_success "Already up to date."
   else
     log_success "Pull complete."
-    _sync_after_pull "$pre"
+    _sync_after_pull
   fi
   [[ -n "$_PULL_BACKUP_DIR" ]] && log_info "Local versions replaced by the remote are kept in: $_PULL_BACKUP_DIR"
 
@@ -525,26 +593,11 @@ sync_pull() {
 # shared by pull and pull --auto
 # ---------------------------------------------------------------------------
 _sync_after_pull() {
-  local pre="$1" quiet="${2:-}" items cat path f kept
-  items="$(_sync_get_pull_items)"
-  if [[ -n "$pre" ]]; then
-    for cat in "${SYNC_USER_CATEGORIES[@]}"; do
-      _sync_item_in_list "$cat" "$items" && continue
-      path="$(_sync_category_to_path "$cat")"
-      # File by file: only what the pull changed goes back to its pre-pull
-      # version — a local edit the pull didn't touch is never overwritten
-      kept=false
-      while IFS= read -r f; do
-        [[ -n "$f" ]] || continue
-        git -C "$CLAUDE_HOME" cat-file -e "$pre:$f" 2>/dev/null || continue
-        git -C "$CLAUDE_HOME" checkout "$pre" -- "$f" 2>/dev/null || true
-        git -C "$CLAUDE_HOME" reset -q HEAD -- "$f" 2>/dev/null || true
-        kept=true
-      done < <(git -C "$CLAUDE_HOME" diff --name-only "$pre" HEAD -- "$path" 2>/dev/null)
-      [[ "$kept" == true && -z "$quiet" ]] && log_info "Selective pull: kept local ${cat} (not in pull selection)"
-    done
+  # Non-pulled categories were held aside during the rebase; under
+  # encryption settings.json is not decrypted over this machine's version
+  if _sync_item_in_list "settings.json" "$(_sync_get_pull_items)"; then
+    crypto_decrypt_all 2>/dev/null || true
   fi
-  crypto_decrypt_all 2>/dev/null || true
   normalize_paths 2>/dev/null || true
   paths_detokenize 2>/dev/null || true
 }
@@ -580,18 +633,25 @@ _sync_pull_auto() {
   # running…): skip only if the remote changed one of the same files. Other
   # edits are set aside and put back — the remote didn't touch them, so they
   # can't conflict (a blanket skip would block pulls forever).
+  _sync_hold_local
   local overlap stash=""
   overlap="$(_sync_dirty_overlap "$branch")"
-  [[ -z "$overlap" ]] || return 0
+  if [[ -n "$overlap" ]]; then
+    # Not silently skipped forever: reported at the next session
+    _sync_release_local
+    _sync_record_conflict "$(tr '\n' ',' <<< "$overlap" | sed 's/,$//')"
+    return 0
+  fi
   [[ -z "$(git -C "$CLAUDE_HOME" diff --name-only HEAD 2>/dev/null)" ]] || stash="--autostash"
 
   # Plain rebase: changes to different lines merge; a real conflict (also with
   # a local commit that failed to push) is left for the user, never settled
   # by dropping one side
   if git -C "$CLAUDE_HOME" rebase -q ${stash:+"$stash"} "origin/$branch" &>/dev/null; then
+    _sync_release_local
     rm -f "$CLAUDE_HOME/.kitsync/conflict_pending" 2>/dev/null || true
     if [[ "$pre" != "$(git -C "$CLAUDE_HOME" rev-parse HEAD 2>/dev/null)" ]]; then
-      _sync_after_pull "$pre" quiet
+      _sync_after_pull
       printf 'updated\n' > "$CLAUDE_HOME/.kitsync/pending-notice" 2>/dev/null || true
     fi
     return 0
@@ -600,10 +660,22 @@ _sync_pull_auto() {
   local files
   files="$(git -C "$CLAUDE_HOME" diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ',' | sed 's/,$//')"
   git -C "$CLAUDE_HOME" rebase --abort 2>/dev/null || true   # our own rebase (lock held)
+  _sync_release_local
   if [[ -n "$files" ]]; then
     _sync_record_conflict "$files"
   fi
   return 0
+}
+
+# _sync_push_effective — push categories minus the ones this machine doesn't
+# pull: it never sees the others' changes there, so pushing would revert them
+_sync_push_effective() {
+  local push pull out="" cat
+  push="$(_sync_get_push_items)"; pull="$(_sync_get_pull_items)"
+  for cat in "${SYNC_USER_CATEGORIES[@]}"; do
+    _sync_item_in_list "$cat" "$push" && _sync_item_in_list "$cat" "$pull" && out+="${out:+,}$cat"
+  done
+  printf '%s' "$out"
 }
 
 # ---------------------------------------------------------------------------
@@ -611,14 +683,14 @@ _sync_pull_auto() {
 # allowlist filtered by the push selection — deletions included
 # ---------------------------------------------------------------------------
 _sync_stage() {
-  if _crypto_is_enabled 2>/dev/null; then
+  local items
+  items="$(_sync_push_effective)"
+  if _crypto_is_enabled 2>/dev/null && _sync_item_in_list "settings.json" "$items"; then
     crypto_encrypt_all >/dev/null 2>&1 || true
   fi
 
   # Keep settings.template.json in sync with settings.json (plaintext only —
   # under encryption the template is ignored and untracked).
-  local items
-  items="$(_sync_get_push_items)"
   if ! _crypto_is_enabled 2>/dev/null && \
      [[ -f "$CLAUDE_HOME/settings.template.json" ]] && [[ -f "$CLAUDE_HOME/settings.json" ]] && \
      _sync_item_in_list "settings.json" "$items"; then
@@ -802,14 +874,22 @@ sync_push() {
     # Usually the remote moved on (another machine pushed): replay the local
     # commits on top and retry. No -X strategy: a local commit never silently
     # loses hunks here; a real conflict is left for `claude-kitsync pull`.
-    if _git_net fetch -q origin "$_branch" &>/dev/null && \
-       git -C "$CLAUDE_HOME" rebase -q "origin/$_branch" &>/dev/null && \
-       git -C "$CLAUDE_HOME" push -q -u origin "$_branch" 2>/dev/null; then
-      _sync_after_pull "" quiet   # decrypt + real paths for what came in
+    local _rb=1 _stash=""
+    if _git_net fetch -q origin "$_branch" &>/dev/null; then
+      _sync_hold_local
+      if [[ -z "$(_sync_dirty_overlap "$_branch")" ]]; then
+        [[ -z "$(git -C "$CLAUDE_HOME" diff --name-only HEAD 2>/dev/null)" ]] || _stash="--autostash"
+        git -C "$CLAUDE_HOME" rebase -q ${_stash:+"$_stash"} "origin/$_branch" &>/dev/null && _rb=0
+      fi
+      [[ $_rb -eq 0 ]] && _sync_release_local
+    fi
+    if [[ $_rb -eq 0 ]] && git -C "$CLAUDE_HOME" push -q -u origin "$_branch" 2>/dev/null; then
+      _sync_after_pull   # decrypt + real paths for what came in
     else
       local _cf
       _cf="$(git -C "$CLAUDE_HOME" diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ',' | sed 's/,$//')"
       git -C "$CLAUDE_HOME" rebase --abort 2>/dev/null || true
+      _sync_release_local
       if [[ -n "$_cf" ]]; then
         _sync_record_conflict "$_cf"
         log_warn "Push failed — your changes conflict with the remote's ($_cf). Your commit is kept locally; resolve with: claude-kitsync pull"

@@ -49,6 +49,7 @@ source "$_RUNNER_DIR/test_autosync.sh"
 source "$_RUNNER_DIR/test_hooks.sh"
 source "$_RUNNER_DIR/test_push.sh"
 source "$_RUNNER_DIR/test_pull.sh"
+source "$_RUNNER_DIR/test_selective.sh"
 
 # Some sourced lib files (lib/core.sh, lib/wrapper.sh) call set -euo pipefail,
 # which activates -e in this shell. Re-disable it — the runner intentionally
@@ -82,6 +83,7 @@ case "$_FILTER" in
     run_hooks_tests
     run_push_tests
     run_pull_tests
+    run_selective_tests
     ;;
   gitignore)
     run_gitignore_tests
@@ -131,8 +133,11 @@ case "$_FILTER" in
   pull)
     run_pull_tests
     ;;
+  selective)
+    run_selective_tests
+    ;;
   *)
-    printf "Unknown filter '%s'. Valid: all, gitignore, paths, sync, install, idempotent, wrapper, regressions, upgrade, uninstall, doctor, init, starter, autosync, hooks, push, pull\n" "$_FILTER" >&2
+    printf "Unknown filter '%s'. Valid: all, gitignore, paths, sync, install, idempotent, wrapper, regressions, upgrade, uninstall, doctor, init, starter, autosync, hooks, push, pull, selective\n" "$_FILTER" >&2
     exit 1
     ;;
 esac
