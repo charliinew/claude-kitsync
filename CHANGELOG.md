@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.1.15] — 2026-10-03
+
+### Fixed
+- **The `claude()` wrapper did not parse in bash** (zsh's `&!`): bash users got an error on every new shell and never had automatic sync. Background jobs now use `( cmd & )`, which works in both shells.
+- **Auto-pull could push a broken `settings.json` to every machine**: with an uncommitted edit, `git pull --autostash` left conflict markers in the file and reported success; the end-of-session push then committed them. The wrapper now calls `claude-kitsync pull --auto`, which skips the pull when there are local edits instead of stashing them.
+- **Auto-pull ignored the pull selection, decryption order and conflict rules** of `claude-kitsync pull`: it now runs the same code.
+- **`push` never checks for half-merged files**: files with new conflict markers, and an invalid `settings.json`, are now left out of the commit with a warning (shown again at the next `claude` launch). Conflict markers already in the committed file (docs about merges) don't block.
+- **The path-token migration committed local `settings.json` edits on its own** before every push and pull, bypassing the push selection and checks. It now commits only the tokenized version of the already-committed file.
+- **A second machine could never pull after `init`**: `.kitsync/config` was committed by the first push only, so the next pull stopped on "untracked working tree files would be overwritten". `init` now commits it in the first commit, and existing setups track it automatically before syncing.
+- **Concurrent syncs** (two terminals, or a pull and an end-of-session push) could run git at the same time, and one could `rebase --abort` the other's rebase. A per-machine lock (in `.git/`, never synced) now serialises them; background syncs skip or wait.
+- **The 2 s auto-pull timeout covered the whole pull**, so slow networks never pulled, and a killed git could leave `index.lock` behind. The timeout (`KITSYNC_TIMEOUT`, now 10 s) applies to the download only.
+- **Timer push loop survived a closed terminal** and kept pushing forever; it now stops when its shell is gone.
+
+### Changed
+- `claude --version`, `--help`, `update`, `mcp`, `config`, `doctor`, `plugin`… no longer trigger a sync.
+
 ## [1.1.14] — 2026-10-03
 
 ### Added
