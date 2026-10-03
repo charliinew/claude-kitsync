@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.13] — 2026-10-03
+
+### Fixed
+- **`init`'s conflict prompt crashed on macOS's bash 3.2** (`${x^^}`: bad substitution), leaving a half-initialised repo on the first real conflict.
+- **No conflict prompt during `curl | bash`**: it checked stdin (the pipe) instead of the terminal, so every conflict silently took the remote version.
+- **The local version was lost when the remote one was chosen**: it is now backed up to `.kitsync/backups/init-<date>/` first, and the path is printed.
+- **False conflict on `settings.json`**: the comparison used the remote's path tokens (`__CLAUDE_HOME__`) instead of this machine's paths.
+- `init` compares against `origin/main` explicitly, not whichever branch `FETCH_HEAD` listed first.
+
+### Changed
+- The conflict choice is now **Remote** or **Local**. "Pass" left the file out of the first commit only; the next push sent it anyway. Remote plus the backup covers that need.
+- Conflicts show a labelled unified diff (`--- remote` / `+++ local`).
+
 ## [1.1.12] — 2026-10-03
 
 ### Fixed
