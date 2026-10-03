@@ -199,6 +199,21 @@ _sync_warn_next_launch() {
   printf '%s\n' "$1" > "$CLAUDE_HOME/.kitsync/sync-warning" 2>/dev/null || true
 }
 
+# _git_raw <git args...> — git on ~/.claude with the path-token filter off.
+# Only to get a rebase past content committed before the filter existed,
+# which otherwise looks modified forever and stops it. Real paths are
+# restored by paths_detokenize afterwards.
+_git_raw() {
+  git -C "$CLAUDE_HOME" -c "filter.${KITSYNC_PATH_FILTER}.clean=cat" \
+    -c "filter.${KITSYNC_PATH_FILTER}.smudge=cat" "$@"
+}
+
+# _sync_record_conflict <files,comma,separated> — notice shown at the next session
+_sync_record_conflict() {
+  mkdir -p "$CLAUDE_HOME/.kitsync" 2>/dev/null || true
+  printf 'files:%s\n' "$1" > "$CLAUDE_HOME/.kitsync/conflict_pending" 2>/dev/null || true
+}
+
 # _markers <cmd...> — number of conflict-marker lines in the command's output
 _markers() {
   "$@" 2>/dev/null | grep -cE '^(<<<<<<<|>>>>>>>)( |$)' || true
@@ -297,53 +312,121 @@ _has_remote() {
   git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null
 }
 
-# ---------------------------------------------------------------------------
-# _prompt_conflict_resolution — interactive menu after a failed pull/rebase
-# The rebase is aborted before this is called; repo is in a clean state.
-# ---------------------------------------------------------------------------
-_prompt_conflict_resolution() {
-  local _branch="$1"
 
-  printf "\n"
-  local choice
-  choice=$(_select_menu "How would you like to resolve?" \
-    "Accept remote — reset local to remote version" \
-    "Keep local — discard incoming changes" \
-    "Exit — I will resolve manually")
+# _sync_dirty_overlap <branch> — uncommitted local edits to files the remote
+# changed (those can't be set aside and put back without a conflict)
+_sync_dirty_overlap() {
+  local dirty
+  dirty="$(git -C "$CLAUDE_HOME" diff --name-only HEAD 2>/dev/null || true)"
+  [[ -n "$dirty" ]] || return 0
+  # What the REMOTE changed since the common ancestor — not the local
+  # commits that HEAD..origin would also list
+  local base
+  base="$(git -C "$CLAUDE_HOME" merge-base HEAD "origin/$1" 2>/dev/null || echo HEAD)"
+  comm -12 <(sort <<< "$dirty") \
+    <(git -C "$CLAUDE_HOME" diff --name-only "$base" "origin/$1" 2>/dev/null | sort)
+}
 
-  case "$choice" in
-    1)
-      log_step "Accepting remote version..."
-      git -C "$CLAUDE_HOME" fetch origin -q 2>/dev/null || true
-      git -C "$CLAUDE_HOME" reset --hard "origin/$_branch" 2>/dev/null || {
-        log_warn "Hard reset failed — try manually: git -C \"$CLAUDE_HOME\" reset --hard origin/$_branch"
-        return 1
-      }
-      crypto_decrypt_all 2>/dev/null || true
-      normalize_paths
-      paths_detokenize
-      log_success "Pulled remote version — local state updated."
-      ;;
-    2)
-      log_info "Keeping local version — no changes applied."
-      ;;
-    3)
-      log_info "Exiting — repo is clean (rebase aborted)."
-      log_info "To inspect: cd \"$CLAUDE_HOME\" && git status"
-      ;;
-  esac
+# _pull_backup <file> <source> — keep a local version before the remote's
+# replaces it: <source> is "worktree" or a git object spec (e.g. :3:file)
+_PULL_BACKUP_DIR=""
+_pull_backup() {
+  local f="$1" src="$2" dest
+  if [[ -z "$_PULL_BACKUP_DIR" ]]; then
+    _PULL_BACKUP_DIR="$CLAUDE_HOME/.kitsync/backups/pull-$(date '+%Y%m%dT%H%M%S')"
+  fi
+  dest="$_PULL_BACKUP_DIR/$f"
+  mkdir -p "$(dirname "$dest")"
+  if [[ "$src" == worktree ]]; then
+    [[ -f "$CLAUDE_HOME/$f" ]] && cp -p "$CLAUDE_HOME/$f" "$dest"
+  else
+    # --filters: the version as it would be on disk (path tokens expanded)
+    git -C "$CLAUDE_HOME" cat-file --filters "$src" > "$dest" 2>/dev/null || rm -f "$dest"
+  fi
+  return 0
+}
+
+# _pull_take <stage> <file> — resolve a conflicted file with one side
+# (2 = remote, 3 = local during a rebase); a side without the file deletes it
+_pull_take() {
+  if git -C "$CLAUDE_HOME" cat-file -e ":$1:$2" 2>/dev/null; then
+    git -C "$CLAUDE_HOME" checkout "--$([[ $1 == 2 ]] && echo ours || echo theirs)" -- "$2" 2>/dev/null
+    git -C "$CLAUDE_HOME" add -- "$2" 2>/dev/null
+  else
+    git -C "$CLAUDE_HOME" rm -q -- "$2" 2>/dev/null
+  fi
 }
 
 # ---------------------------------------------------------------------------
-# sync_pull — pull latest changes from remote
+# _pull_resolve <force> — settle a stopped rebase file by file.
+#   R (remote): the local version is backed up first
+#   L (local):  kept, and pushed once the pull is done
+# --force takes the remote for every file. Without a terminal (and without
+# --force) nothing is decided: returns 1 so the caller aborts and records it.
+# ---------------------------------------------------------------------------
+_PULL_KEPT_LOCAL=""
+_pull_resolve() {
+  local force="$1" gd files f choice
+  gd="$(git -C "$CLAUDE_HOME" rev-parse --absolute-git-dir)"
+  [[ "$force" == --force ]] || _has_tty || return 1
+  local rounds=0
+  while [[ -d "$gd/rebase-merge" || -d "$gd/rebase-apply" ]]; do
+    (( ++rounds <= 100 )) || return 1
+    files="$(git -C "$CLAUDE_HOME" diff --name-only --diff-filter=U 2>/dev/null)"
+    if [[ -z "$files" ]]; then
+      # Stopped without a conflict: a file only *looks* modified (path-token
+      # filter vs. content committed before it existed). Real local edits were
+      # set aside before the rebase, so discarding the difference is safe.
+      [[ -n "$(git -C "$CLAUDE_HOME" diff --name-only 2>/dev/null)" ]] || return 1
+      _git_raw checkout -- . 2>/dev/null || return 1
+      GIT_EDITOR=true _git_raw rebase --continue &>/dev/null || true
+      continue
+    fi
+    while IFS= read -r f; do
+      if [[ "$force" == --force ]]; then
+        choice=R
+      else
+        printf "\n" >&2
+        log_warn "Conflict: $f"
+        diff -u --label "remote: $f" --label "local: $f" \
+          <(git -C "$CLAUDE_HOME" cat-file --filters ":2:$f" 2>/dev/null) \
+          <(git -C "$CLAUDE_HOME" cat-file --filters ":3:$f" 2>/dev/null) | head -40 >&2 || true
+        while true; do
+          # tr, not ${x^^}: macOS ships bash 3.2
+          choice="$(_init_read_choice | tr '[:lower:]' '[:upper:]')"
+          case "$choice" in R|L) break ;; *) printf "  Please enter R or L\n" >/dev/tty ;; esac
+        done
+      fi
+      if [[ "$choice" == R ]]; then
+        _pull_backup "$f" ":3:$f"
+        _pull_take 2 "$f"
+        log_info "  → Remote: $f  (local copy: $_PULL_BACKUP_DIR/$f)"
+      else
+        _pull_take 3 "$f"
+        _PULL_KEPT_LOCAL+="$f "
+        log_info "  → Local:  $f"
+      fi
+    done <<< "$files"
+    # A commit left with nothing of its own (all remote) is dropped
+    if git -C "$CLAUDE_HOME" diff --cached --quiet 2>/dev/null; then
+      GIT_EDITOR=true git -C "$CLAUDE_HOME" rebase --skip &>/dev/null || true
+    else
+      GIT_EDITOR=true git -C "$CLAUDE_HOME" rebase --continue &>/dev/null || true
+    fi
+  done
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# sync_pull [--force] — pull, asking about real conflicts
 #
-# Strategy:
-#   1. Skip with warning if dirty working tree (never lose local changes)
-#   2. git pull --rebase --autostash -X ours (remote wins on conflict).
-#      During a rebase the sides are swapped: "ours" is the upstream being
-#      rebased onto (the remote), "theirs" is the local commits being replayed.
-#   3. On failure: abort rebase and warn
-#   4. Decrypt, then normalise paths after successful pull
+#   - local commits are replayed on top of the remote; changes to different
+#     lines merge by themselves
+#   - a conflict is resolved file by file (remote or local); a remote choice
+#     backs up the local version, a local choice is pushed right away
+#   - uncommitted edits to files the remote changed stop the pull (push them
+#     first) unless --force, which takes the remote everywhere, backed up
+#   - without a terminal nothing is decided: the conflict is recorded
 # ---------------------------------------------------------------------------
 sync_pull() {
   local force=""
@@ -363,87 +446,77 @@ sync_pull() {
     return 0
   fi
 
-  # Clear any pending conflict notification — user is handling it explicitly
-  rm -f "$CLAUDE_HOME/.kitsync/conflict_pending" 2>/dev/null || true
-
-  # Step 1: dirty tree check
-  if _is_dirty; then
-    if [[ "$force" == "--force" ]]; then
-      log_warn "Dirty tree detected — force flag passed, continuing anyway."
-    else
-      log_warn "Uncommitted changes detected in $CLAUDE_HOME — skipping auto-pull."
-      log_warn "Commit or stash your changes first, or run: claude-kitsync pull --force"
-      return 0
-    fi
-  fi
-
-  # Ensure upstream tracking is set
-  local _branch
-  _branch="$(git -C "$CLAUDE_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
-  if ! git -C "$CLAUDE_HOME" rev-parse --abbrev-ref --symbolic-full-name '@{u}' &>/dev/null 2>&1; then
-    git -C "$CLAUDE_HOME" branch --set-upstream-to="origin/$_branch" "$_branch" 2>/dev/null || true
-  fi
-
+  local branch err
+  branch="$(git -C "$CLAUDE_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
   log_step "Pulling from remote..."
+  if ! err="$(_git_net fetch -q origin "$branch" 2>&1)"; then
+    log_warn "Could not reach the remote:"
+    printf '%s\n' "$err" | head -3 | sed 's/^/    /' >&2
+    return 1
+  fi
+  if ! git -C "$CLAUDE_HOME" rev-parse --verify -q "origin/$branch" >/dev/null; then
+    log_info "Remote is empty — nothing to pull."
+    return 0
+  fi
+  git -C "$CLAUDE_HOME" rev-parse --abbrev-ref '@{u}' &>/dev/null || \
+    git -C "$CLAUDE_HOME" branch -q --set-upstream-to="origin/$branch" "$branch" 2>/dev/null || true
 
-  # Pre-fetch so we can warn about local commits that -X ours will override
-  if git -C "$CLAUDE_HOME" fetch origin -q 2>/dev/null; then
-    if git -C "$CLAUDE_HOME" rev-parse --verify "origin/$_branch" &>/dev/null; then
-      local _local_changed _remote_changed _would_overwrite
-      _local_changed="$(git -C "$CLAUDE_HOME" diff --name-only "origin/$_branch..HEAD" 2>/dev/null || true)"
-      _remote_changed="$(git -C "$CLAUDE_HOME" diff --name-only "HEAD..origin/$_branch" 2>/dev/null || true)"
+  _PULL_BACKUP_DIR=""
+  _PULL_KEPT_LOCAL=""
 
-      if [[ -n "$_local_changed" ]] && [[ -n "$_remote_changed" ]]; then
-        _would_overwrite="$(comm -12 \
-          <(printf '%s\n' "$_local_changed" | sort) \
-          <(printf '%s\n' "$_remote_changed" | sort) || true)"
-
-        if [[ -n "$_would_overwrite" ]]; then
-          log_warn "Conflict detected — the following files changed both locally and on remote:"
-          while IFS= read -r _f; do
-            log_warn "  • $_f"
-          done <<< "$_would_overwrite"
-          log_warn "Remote version will be kept on conflicting hunks. Your local changes to these hunks will be overwritten."
-          printf "\n"
-        fi
-      fi
+  # Uncommitted edits to files the remote also changed
+  local overlap f
+  overlap="$(_sync_dirty_overlap "$branch")"
+  if [[ -n "$overlap" ]]; then
+    if [[ "$force" == --force ]]; then
+      while IFS= read -r f; do
+        _pull_backup "$f" worktree
+        git -C "$CLAUDE_HOME" checkout HEAD -- "$f" 2>/dev/null || rm -f "$CLAUDE_HOME/$f"
+      done <<< "$overlap"
+      log_info "Your uncommitted edits to $(tr '\n' ' ' <<< "$overlap")were set aside in $_PULL_BACKUP_DIR"
+    else
+      log_warn "You have uncommitted edits to files that also changed on the remote:"
+      while IFS= read -r f; do log_warn "  • $f"; done <<< "$overlap"
+      log_info "Push them first (claude-kitsync push), then pull to resolve file by file —"
+      log_info "or take the remote version: claude-kitsync pull --force (your edits are backed up)."
+      return 1
     fi
   fi
 
-  # Save SHA before pull for selective pull restore
-  local _pre_pull_sha
-  _pre_pull_sha="$(git -C "$CLAUDE_HOME" rev-parse HEAD 2>/dev/null || true)"
+  local pre stash=""
+  pre="$(git -C "$CLAUDE_HOME" rev-parse HEAD 2>/dev/null || true)"
+  [[ -z "$(git -C "$CLAUDE_HOME" diff --name-only HEAD 2>/dev/null)" ]] || stash="--autostash"
 
-  # Step 2: rebase pull with autostash; -X ours = remote wins (rebase swaps sides)
-  local _pull_out
-  if _pull_out="$(git -C "$CLAUDE_HOME" pull --rebase --autostash --allow-unrelated-histories -X ours 2>&1)"; then
-    log_success "Pull complete."
+  if ! git -C "$CLAUDE_HOME" rebase -q ${stash:+"$stash"} "origin/$branch" &>/dev/null; then
+    local conflicts
+    conflicts="$(git -C "$CLAUDE_HOME" diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ',' | sed 's/,$//')"
+    if ! _pull_resolve "$force"; then
+      git -C "$CLAUDE_HOME" rebase --abort 2>/dev/null || true
+      if [[ -n "$conflicts" ]]; then
+        _sync_record_conflict "$conflicts"
+        log_warn "Conflict in: $conflicts — nothing was changed."
+        log_info "Run 'claude-kitsync pull' in a terminal to choose file by file, or"
+        log_info "'claude-kitsync pull --force' to take the remote (local versions are backed up)."
+      else
+        log_warn "Pull failed — nothing was changed. Check: git -C \"$CLAUDE_HOME\" status"
+      fi
+      return 1
+    fi
+  fi
 
-    _sync_after_pull "$_pre_pull_sha"
+  rm -f "$CLAUDE_HOME/.kitsync/conflict_pending" 2>/dev/null || true
+  if [[ "$pre" == "$(git -C "$CLAUDE_HOME" rev-parse HEAD 2>/dev/null)" ]]; then
+    log_success "Already up to date."
   else
-    # Step 3: show conflict details, abort rebase, offer interactive resolution
-    log_warn "Pull/rebase failed — checking for conflicts..."
+    log_success "Pull complete."
+    _sync_after_pull "$pre"
+  fi
+  [[ -n "$_PULL_BACKUP_DIR" ]] && log_info "Local versions replaced by the remote are kept in: $_PULL_BACKUP_DIR"
 
-    local _conflicts
-    _conflicts="$(git -C "$CLAUDE_HOME" diff --name-only --diff-filter=U 2>/dev/null)"
-    if [[ -n "$_conflicts" ]]; then
-      log_warn "Conflicting files:"
-      while IFS= read -r _f; do
-        log_warn "  • $_f"
-      done <<< "$_conflicts"
-    fi
-
-    if [[ -n "$_pull_out" ]]; then
-      log_warn "Git output:"
-      printf "%s\n" "$_pull_out" | grep -v "^$" | while IFS= read -r _line; do
-        log_warn "  $_line"
-      done
-    fi
-
-    git -C "$CLAUDE_HOME" rebase --abort 2>/dev/null || true
-    log_warn "Rebase aborted — local state restored."
-    _prompt_conflict_resolution "$_branch"
-    return $?
+  # Versions kept on purpose go out now, or the next pull would ask again
+  if [[ -n "$_PULL_KEPT_LOCAL" ]]; then
+    log_step "Pushing the local versions you kept..."
+    sync_push "kitsync: keep local version of ${_PULL_KEPT_LOCAL% }"
   fi
 }
 
@@ -507,17 +580,15 @@ _sync_pull_auto() {
   # running…): skip only if the remote changed one of the same files. Other
   # edits are set aside and put back — the remote didn't touch them, so they
   # can't conflict (a blanket skip would block pulls forever).
-  local dirty overlap stash=""
-  dirty="$(git -C "$CLAUDE_HOME" diff --name-only HEAD 2>/dev/null || true)"
-  if [[ -n "$dirty" ]]; then
-    overlap="$(comm -12 <(sort <<< "$dirty") \
-      <(git -C "$CLAUDE_HOME" diff --name-only HEAD "origin/$branch" 2>/dev/null | sort))"
-    [[ -z "$overlap" ]] || return 0
-    stash="--autostash"
-  fi
+  local overlap stash=""
+  overlap="$(_sync_dirty_overlap "$branch")"
+  [[ -z "$overlap" ]] || return 0
+  [[ -z "$(git -C "$CLAUDE_HOME" diff --name-only HEAD 2>/dev/null)" ]] || stash="--autostash"
 
-  # -X ours = remote wins (a rebase swaps sides)
-  if git -C "$CLAUDE_HOME" rebase -q -X ours ${stash:+"$stash"} "origin/$branch" &>/dev/null; then
+  # Plain rebase: changes to different lines merge; a real conflict (also with
+  # a local commit that failed to push) is left for the user, never settled
+  # by dropping one side
+  if git -C "$CLAUDE_HOME" rebase -q ${stash:+"$stash"} "origin/$branch" &>/dev/null; then
     rm -f "$CLAUDE_HOME/.kitsync/conflict_pending" 2>/dev/null || true
     if [[ "$pre" != "$(git -C "$CLAUDE_HOME" rev-parse HEAD 2>/dev/null)" ]]; then
       _sync_after_pull "$pre" quiet
@@ -530,7 +601,7 @@ _sync_pull_auto() {
   files="$(git -C "$CLAUDE_HOME" diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ',' | sed 's/,$//')"
   git -C "$CLAUDE_HOME" rebase --abort 2>/dev/null || true   # our own rebase (lock held)
   if [[ -n "$files" ]]; then
-    printf 'files:%s\n' "$files" > "$CLAUDE_HOME/.kitsync/conflict_pending" 2>/dev/null || true
+    _sync_record_conflict "$files"
   fi
   return 0
 }
@@ -734,13 +805,13 @@ sync_push() {
     if _git_net fetch -q origin "$_branch" &>/dev/null && \
        git -C "$CLAUDE_HOME" rebase -q "origin/$_branch" &>/dev/null && \
        git -C "$CLAUDE_HOME" push -q -u origin "$_branch" 2>/dev/null; then
-      :
+      _sync_after_pull "" quiet   # decrypt + real paths for what came in
     else
       local _cf
       _cf="$(git -C "$CLAUDE_HOME" diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ',' | sed 's/,$//')"
       git -C "$CLAUDE_HOME" rebase --abort 2>/dev/null || true
       if [[ -n "$_cf" ]]; then
-        printf 'files:%s\n' "$_cf" > "$CLAUDE_HOME/.kitsync/conflict_pending" 2>/dev/null || true
+        _sync_record_conflict "$_cf"
         log_warn "Push failed — your changes conflict with the remote's ($_cf). Your commit is kept locally; resolve with: claude-kitsync pull"
       else
         log_warn "Push failed — your commit is kept locally. Run 'claude-kitsync push' to retry (or 'claude-kitsync doctor')."

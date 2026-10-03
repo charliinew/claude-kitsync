@@ -220,7 +220,7 @@ cmd_hook() {
     session-start)
       local notes="" f="$CLAUDE_HOME/.kitsync"
       if [[ -f "$f/conflict_pending" ]]; then
-        notes+="kitsync: sync conflict pending ($(grep '^files:' "$f/conflict_pending" | cut -d: -f2-)). Resolve: claude-kitsync pull — or take the remote: claude-kitsync pull --force"$'\n'
+        notes+="kitsync: sync conflict pending ($(grep '^files:' "$f/conflict_pending" | cut -d: -f2-)). Choose file by file: claude-kitsync pull — or take the remote for all (local versions backed up): claude-kitsync pull --force"$'\n'
       fi
       if [[ -f "$f/sync-warning" ]]; then
         notes+="kitsync: $(cat "$f/sync-warning")"$'\n'

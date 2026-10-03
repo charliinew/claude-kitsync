@@ -115,7 +115,13 @@ The background pull stashes them, pulls, and re-applies them (`--autostash`). A 
 
 ### Who wins when the same file changed on two machines?
 
-The remote. `pull` rebases your local commits on top of the remote with `-X ours` (during a rebase "ours" is the upstream side), and lists the files concerned before doing so. Use `claude-kitsync diff` first if you want to review.
+Nobody, silently. Changes to different lines of a file merge by themselves. When the same lines changed on both machines:
+
+- the background pull (each session start) changes nothing and Claude Code shows a "sync conflict pending" notice;
+- `claude-kitsync pull` in a terminal shows each conflicting file as a diff and asks **remote** or **local**. Remote keeps a copy of your version in `~/.claude/.kitsync/backups/pull-<date>/`; local is pushed right away;
+- `claude-kitsync pull --force` takes the remote for every conflicting file, backing up yours.
+
+A change that never reached the remote is never dropped without asking. Use `claude-kitsync diff` first if you want to review.
 
 ### My `settings.json` has broken paths after pulling on a new machine.
 

@@ -57,8 +57,8 @@ claude() {
     printf "\n\033[33m⚠  kitsync: sync conflict pending\033[0m\n" >&2
     _v="$(grep '^files:' "$_ks_cf" 2>/dev/null | cut -d: -f2-)"
     [[ -n "$_v" ]] && printf "   Conflicting: %s\n" "$_v" >&2
-    printf "   Resolve now:   claude-kitsync pull\n" >&2
-    printf "   Accept remote: claude-kitsync pull --force\n\n" >&2
+    printf "   Choose file by file:  claude-kitsync pull\n" >&2
+    printf "   Take the remote:      claude-kitsync pull --force  (local versions backed up)\n\n" >&2
   fi
   local _ks_warn="$_ks_home/.kitsync/sync-warning"
   if [[ -f "$_ks_warn" ]]; then

@@ -113,10 +113,21 @@ run_test_reg_remote_wins_on_conflict() {
 
   echo "LOCAL" > "$_REG_HOME/.claude/CLAUDE.md"
   git -C "$_REG_HOME/.claude" commit -qam local
-  _reg_run "$_REG_HOME" sync_pull >/dev/null
 
+  # 1.2.2: no terminal → nothing is decided (the remote used to win silently,
+  # dropping the local commit)
+  KITSYNC_NO_TTY=1 _reg_run "$_REG_HOME" sync_pull >/dev/null
+  assert_eq "LOCAL" "$(cat "$_REG_HOME/.claude/CLAUDE.md")" \
+    "REG: conflict without a terminal leaves the local commit alone"
+  assert_contains "$(cat "$_REG_HOME/.claude/.kitsync/conflict_pending" 2>/dev/null)" "CLAUDE.md" \
+    "REG: conflict without a terminal is recorded"
+
+  # --force: the remote wins, the local version is backed up
+  KITSYNC_NO_TTY=1 _reg_run "$_REG_HOME" sync_pull --force >/dev/null
   assert_eq "REMOTE" "$(cat "$_REG_HOME/.claude/CLAUDE.md")" \
-    "REG: conflicting hunk resolved in favour of remote"
+    "REG: pull --force takes the remote version"
+  assert_eq "LOCAL" "$(cat "$_REG_HOME"/.claude/.kitsync/backups/pull-*/CLAUDE.md 2>/dev/null)" \
+    "REG: pull --force backs up the local version"
 }
 
 run_test_reg_encryption_leaks_nothing() {

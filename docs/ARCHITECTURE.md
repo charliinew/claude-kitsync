@@ -43,15 +43,16 @@ User types: claude <prompt>
 - Config is applied on the *next* invocation if pull completes after launch
 - Silent failure on network issues — non-blocking
 
-### Conflict Strategy: skip-if-dirty → autostash rebase → `-X ours`
+### Conflict Strategy: never drop an unpushed change without asking
 
-| Layer | What it does |
-|---|---|
-| `skip-if-dirty` | If uncommitted changes exist, skip the pull entirely (never overwrite local work) |
-| `--autostash` | If the tree is clean, git auto-stashes before rebase and restores after |
-| `-X ours` | On conflicting hunks, keep the **remote** version. During a rebase the sides are swapped: "ours" is the upstream being rebased onto, "theirs" is the local commits being replayed |
+| Situation | Background pull (`pull --auto`) | `claude-kitsync pull` |
+|---|---|---|
+| Uncommitted edits to files the remote didn't change | set aside (autostash) and put back | same |
+| Uncommitted edits to files the remote changed | skipped | refused, files named (`--force`: take the remote, edits backed up) |
+| Local commits, changes on different lines | plain rebase merges them | same |
+| Local commits conflicting with the remote | rebase aborted, conflict recorded (`.kitsync/conflict_pending`, shown at next session) | file by file: remote (local version backed up to `.kitsync/backups/pull-<date>/`) or local (pushed right away); no terminal → recorded |
 
-Uncommitted work is never lost (skip-if-dirty / autostash). For *committed* local changes that conflict with the remote, **the remote wins**; `pull` lists the affected files before rebasing.
+No `-X` strategy and no `reset --hard`: earlier versions let the remote win silently (`-X ours`), which dropped a local commit whose push had hit the conflict.
 
 ### Absolute Path Handling: git clean/smudge filter
 
@@ -153,7 +154,7 @@ Session starts (terminal, IDE, desktop)
          ├── SessionStart hook → claude-kitsync _hook session-start
          │     ├── prints pending notices (systemMessage)
          │     └── [detached] pull --auto: lock → skip if dirty/mid-rebase
-         │           → fetch (timeout) → rebase -X ours → selective pull,
+         │           → fetch (timeout) → rebase (conflict → recorded) → selective pull,
          │             decrypt, paths → conflict_pending / pending-notice
          │
          ├── … session …   (timer mode: Stop hook → push every N minutes)
@@ -225,7 +226,7 @@ kitsync install https://github.com/user/claude-kit
 
 **Scenario:** Both local and remote modified the same line in `settings.json`.
 
-**Resolution:** `git pull --rebase -X ours` resolves in favour of the local version automatically. If the rebase still fails (e.g., complex conflict), `sync_pull()` runs `git rebase --abort` to restore the pre-pull state and warns the user.
+**Resolution:** Changes to different lines merge during the rebase. A real conflict is never settled automatically: the background pull aborts and records it; `claude-kitsync pull` asks file by file (remote choice backs up the local version, local choice is pushed).
 
 ---
 
