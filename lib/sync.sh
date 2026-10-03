@@ -639,10 +639,26 @@ sync_push() {
   _plog_step "Pushing to remote..."
   local _branch
   _branch="$(git -C "$CLAUDE_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
-  if ! git -C "$CLAUDE_HOME" push -q 2>/dev/null; then
-    # No upstream set yet — set it and push
-    git -C "$CLAUDE_HOME" push -q -u origin "$_branch" 2>/dev/null || \
-      log_warn "Auto-push failed — run 'claude-kitsync push' to retry."
+  if ! git -C "$CLAUDE_HOME" push -q -u origin "$_branch" 2>/dev/null; then
+    # Usually the remote moved on (another machine pushed): replay the local
+    # commits on top and retry. No -X strategy: a local commit never silently
+    # loses hunks here; a real conflict is left for `claude-kitsync pull`.
+    if _git_net fetch -q origin "$_branch" &>/dev/null && \
+       git -C "$CLAUDE_HOME" rebase -q "origin/$_branch" &>/dev/null && \
+       git -C "$CLAUDE_HOME" push -q -u origin "$_branch" 2>/dev/null; then
+      :
+    else
+      local _cf
+      _cf="$(git -C "$CLAUDE_HOME" diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ',' | sed 's/,$//')"
+      git -C "$CLAUDE_HOME" rebase --abort 2>/dev/null || true
+      if [[ -n "$_cf" ]]; then
+        printf 'files:%s\n' "$_cf" > "$CLAUDE_HOME/.kitsync/conflict_pending" 2>/dev/null || true
+        log_warn "Push failed — your changes conflict with the remote's ($_cf). Your commit is kept locally; resolve with: claude-kitsync pull"
+      else
+        log_warn "Push failed — your commit is kept locally. Run 'claude-kitsync push' to retry (or 'claude-kitsync doctor')."
+      fi
+      return 1
+    fi
   fi
 
   _plog_success "Push complete."

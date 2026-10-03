@@ -127,44 +127,38 @@ _settings_sync() {
   fi
 
   _prompt_sync_preferences
+  # Timer mode adds a Stop hook, other modes remove it
+  grep -qF "$KITSYNC_HOOK_MARK" "$CLAUDE_HOME/settings.json" 2>/dev/null && hooks_install
+  return 0
 }
 
 # ---------------------------------------------------------------------------
-# _settings_wrapper — reinstall or remove the shell wrapper
+# _settings_wrapper — how sync is triggered: Claude Code hooks (default) or
+# the legacy claude() shell wrapper
 # ---------------------------------------------------------------------------
 _settings_wrapper() {
-  local zshrc="${ZDOTDIR:-$HOME}/.zshrc"
-  local bashrc="$HOME/.bashrc"
-  local installed_in=()
-  { [[ -f "$zshrc" ]] && grep -qF "# kitsync-start" "$zshrc" 2>/dev/null; } && installed_in+=("$zshrc")
-  { [[ -f "$bashrc" ]] && grep -qF "# kitsync-start" "$bashrc" 2>/dev/null; } && installed_in+=("$bashrc")
-
   printf "\n" >&2
-  if [[ ${#installed_in[@]} -gt 0 ]]; then
-    for _f in "${installed_in[@]}"; do
-      log_info "Wrapper installed in: $_f"
-    done
+  local rcs
+  rcs="$(_wrapper_rc_files)"
+  if hooks_installed; then
+    log_success "Sync hooks installed in settings.json (terminal, IDE, desktop)"
   else
-    log_warn "Wrapper not found in any rc file"
+    log_warn "Sync hooks not installed"
   fi
+  [[ -n "$rcs" ]] && log_info "Legacy shell wrapper in: $(tr '\n' ' ' <<< "$rcs")"
 
   local choice
-  choice="$(_select_menu "Shell wrapper" \
-    "Reinstall  (update to latest version)" \
-    "Remove wrapper" \
+  choice="$(_select_menu "Sync triggers" \
+    "Install / repair hooks  (recommended — removes the shell wrapper)" \
+    "Remove all sync triggers  (sync only with claude-kitsync push/pull)" \
     "Back")"
-
   case "$choice" in
-    1)
-      log_step "Reinstalling shell wrapper..."
-      install_wrapper_auto
-      _print_reload_notice
-      ;;
+    1) sync_trigger_setup ;;
     2)
-      if confirm "Remove the claude() wrapper from your shell?"; then
+      if confirm "Stop syncing automatically?"; then
+        hooks_remove
         remove_wrapper
-        log_success "Wrapper removed."
-        log_info "Run 'claude-kitsync init' to reinstall."
+        log_info "Re-enable with: claude-kitsync settings → Sync triggers"
       fi
       ;;
     3) return 0 ;;
@@ -242,11 +236,12 @@ _settings_about() {
         log_info "Sync config: (no config file — defaults apply)"
       fi
 
-      local zshrc="${ZDOTDIR:-$HOME}/.zshrc"
-      if [[ -f "$zshrc" ]] && grep -qF "# kitsync-start" "$zshrc" 2>/dev/null; then
-        log_info "Wrapper:     installed in $zshrc"
+      if hooks_installed; then
+        log_info "Sync:        Claude Code hooks (terminal, IDE, desktop)"
+      elif [[ -n "$(_wrapper_rc_files)" ]]; then
+        log_info "Sync:        shell wrapper (terminal only)"
       else
-        log_warn "Wrapper:     not found — run: claude-kitsync init"
+        log_warn "Sync:        no automatic trigger — claude-kitsync settings → Sync triggers"
       fi
       printf "\n" >&2
       ;;
@@ -311,7 +306,7 @@ cmd_settings() {
       "Profiles             — manage work/perso remotes" \
       "Security             — encryption for API keys" \
       "Sync timing          — pull / push modes" \
-      "Shell wrapper        — reinstall or remove" \
+      "Sync triggers        — Claude Code hooks or shell wrapper" \
       "Upgrade channel      — stable release or dev (latest commit)" \
       "Status & info        — config, version, doctor" \
       "Exit")"

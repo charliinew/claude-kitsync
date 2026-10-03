@@ -10,7 +10,7 @@
 
 1. **Multi-device synchronisation** — push/pull config across machines via a private git remote.
 2. **Public kit distribution** — install community agent packs/skills without touching sensitive config.
-3. **Zero-latency background sync** — a shell function wrapper pulls in the background before each Claude invocation.
+3. **Zero-latency background sync** — Claude Code hooks (`SessionStart`, `SessionEnd`, `Stop` in timer mode) start background pulls and pushes in every session: terminal, IDE extensions and desktop app. The `claude()` shell function is only a fallback without `python3`.
 
 ---
 
@@ -64,19 +64,19 @@ Uncommitted work is never lost (skip-if-dirty / autostash). For *committed* loca
 
 The working copy always holds real paths and never looks modified after a push; the committed copy is portable. `normalize_paths()` additionally rewrites foreign `/Users/<x>/.claude` / `/home/<x>/.claude` paths in `settings.json` after a pull (legacy content). Content that bypasses git (decrypted `settings.json.enc`) is detokenized explicitly. On first setup, a repo whose `settings.json` was committed with absolute paths gets a one-time migration commit.
 
-### Shell Wrapper: Function (not PATH manipulation)
+### Sync Triggers: Claude Code Hooks (not a shell function)
 
-```bash
-claude() {
-  ...background pull...
-  command claude "$@"   # the real binary
-}
+`lib/hooks.sh` adds to `settings.json` one command per event, e.g.:
+
+```
+PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:…:$PATH"; command -v claude-kitsync >/dev/null 2>&1 && claude-kitsync _hook session-start 2>/dev/null || true
 ```
 
-- `command claude` bypasses shell functions → **zero recursion risk**
-- No PATH manipulation — function shadows the name only within the shell session
-- Works identically in zsh and bash
-- Idempotent: `# kitsync-start` / `# kitsync-end` markers allow safe re-injection
+- Fires in every Claude Code surface (terminal, IDE extensions, desktop), unlike a shell function
+- The usual install dirs are prepended because GUI-launched Claude may not have the user's PATH; `|| true` keeps a machine without kitsync quiet (settings.json is synced)
+- `_hook` only starts a detached `pull --auto` / `push --auto` and returns: `SessionEnd` hooks share a 1.5 s budget
+- Entries are identified by `claude-kitsync _hook`; install/remove leave the user's own hooks alone; `Stop` exists only in timer mode
+- Fallback without `python3`: the legacy `claude()` function between `# kitsync-start` / `# kitsync-end` markers in the rc file; upgrading to 1.2.0 replaces it with the hooks
 
 ### .gitignore: Allowlist (deny-by-default)
 
@@ -103,12 +103,12 @@ claude-kitsync/
 │   ├── core.sh                 # CLAUDE_HOME, logging (log_info/warn/error/success)
 │   ├── paths.sh                # normalize_paths(), paths_filter_setup(), token streams
 │   ├── sync.sh                 # sync_pull(), sync_push(), sync_status()
-│   ├── wrapper.sh              # generate_wrapper(), install_wrapper_zsh/bash/auto()
+│   ├── hooks.sh                # Claude Code sync hooks: install/remove, `_hook` runtime
+│   ├── wrapper.sh              # rc file editing; legacy claude() wrapper (fallback)
 │   ├── init.sh                 # cmd_init() — full setup flow
 │   └── install-kit.sh          # cmd_install() — public kit merge
 ├── templates/
-│   ├── .gitignore.template     # Allowlist .gitignore for ~/.claude
-│   └── shell-wrapper.sh        # Standalone template for the claude() function
+│   └── .gitignore.template     # Allowlist .gitignore for ~/.claude
 ├── docs/
 │   └── ARCHITECTURE.md         # This file
 └── README.md
@@ -141,21 +141,26 @@ kitsync init [--remote <url>]
   ├── Generate settings.template.json (tokenise paths)
   ├── git add <whitelist>
   ├── git commit -m "kitsync: initial commit"
-  ├── install_wrapper_auto() → injects claude() into ~/.zshrc or ~/.bashrc
+  ├── sync_trigger_setup() → sync hooks in settings.json (fallback: claude() in rc)
   └── git push -u origin main (optional, prompts user)
 ```
 
-### Sync Flow (every `claude` invocation)
+### Sync Flow (every Claude Code session)
 
 ```
-User: claude "write me a test"
+Session starts (terminal, IDE, desktop)
          │
-         ├── [background, disowned]
-         │     timeout 2s git pull --rebase --autostash
-         │     └── on success: kitsync _post-pull-hook → decrypt, normalize_paths
+         ├── SessionStart hook → claude-kitsync _hook session-start
+         │     ├── prints pending notices (systemMessage)
+         │     └── [detached] pull --auto: lock → skip if dirty/mid-rebase
+         │           → fetch (timeout) → rebase -X ours → selective pull,
+         │             decrypt, paths → conflict_pending / pending-notice
          │
-         └── [foreground, immediate]
-               command claude "write me a test"
+         ├── … session …   (timer mode: Stop hook → push every N minutes)
+         │
+         └── SessionEnd hook → [detached] push --auto: lock → stage allowlist
+               → leave out half-merged files → commit → push
+               (remote moved on: rebase and retry; conflict → conflict_pending)
 ```
 
 ### Push Flow (`kitsync push`)
@@ -202,11 +207,11 @@ kitsync install https://github.com/user/claude-kit
 
 **Resolution:** `_is_dirty()` check in `sync_pull()` detects uncommitted changes and returns early with a warning. The user's changes are never overwritten. They should `kitsync push` first, then the next `claude` invocation will pull cleanly.
 
-### Background Pull Takes > 2 Seconds
+### Background Pull on a Slow Network
 
 **Scenario:** Slow network or large objects in git history.
 
-**Resolution:** The wrapper uses `timeout 2` which sends SIGTERM to the git process. The pull is silently abandoned. Config is applied on the next invocation when the network is faster. Existing local config continues to work untouched.
+**Resolution:** `pull --auto` puts a timeout (`KITSYNC_TIMEOUT`, 10 s) on the download only; the local rebase is never interrupted, so no `index.lock` is left behind. A timed-out pull is abandoned silently and retried at the next session.
 
 ### .credentials.json Accidentally Added
 

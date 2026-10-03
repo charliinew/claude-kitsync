@@ -39,6 +39,7 @@ source "$KITSYNC_ROOT/lib/crypto.sh"
 source "$KITSYNC_ROOT/lib/upgrade.sh"
 source "$KITSYNC_ROOT/lib/doctor.sh"
 source "$KITSYNC_ROOT/lib/kit-setup.sh"
+source "$KITSYNC_ROOT/lib/hooks.sh"
 
 # ---------------------------------------------------------------------------
 # version
@@ -148,8 +149,9 @@ cmd_uninstall() {
   printf "\n" >&2
   log_info "This will remove:"
   if [[ "$_brew" == true ]]; then
-    printf '    - the claude() wrapper from your shell rc files\n' >&2
+    printf '    - the sync hooks from settings.json and the claude() wrapper from your shell rc files\n' >&2
   else
+    printf '    - the sync hooks from settings.json\n' >&2
     printf '    - the claude() wrapper, PATH entry and completion from your shell rc files\n' >&2
   fi
   for _l in ${_links[@]+"${_links[@]}"}; do printf '    - %s\n' "$_l" >&2; done
@@ -165,6 +167,7 @@ cmd_uninstall() {
   fi
   printf "\n" >&2
 
+  hooks_remove
   remove_wrapper
   rm -f "$(_shell_stamp_file)" 2>/dev/null || true
   rmdir "$(dirname "$(_shell_stamp_file)")" 2>/dev/null || true
@@ -311,8 +314,13 @@ main() {
       post_upgrade "${1:-}"
       ;;
     _install-wrapper)
-      # Internal: called by install.sh on re-install to ensure wrapper is active
-      install_wrapper_auto
+      # Internal: called by install.sh on re-install (name kept for old installers)
+      sync_trigger_setup
+      ;;
+    _hook)
+      # Internal: run by Claude Code (hooks in settings.json)
+      shift
+      cmd_hook "$@"
       ;;
     -h|--help|help|"")
       _usage

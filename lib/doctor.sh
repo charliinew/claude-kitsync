@@ -199,14 +199,15 @@ _doc_check_install() {
     _doc_warn "gpg not found — upgrades can't check release signatures (install gnupg)"
   fi
 
-  local rc found=false
-  for rc in "${ZDOTDIR:-$HOME}/.zshrc" "$HOME/.bashrc"; do
-    grep -qxF "$WRAPPER_START_MARKER" "$rc" 2>/dev/null && found=true
-  done
-  if [[ "$found" == true ]]; then
-    _doc_ok "Shell wrapper installed"
+  local rcs
+  rcs="$(_wrapper_rc_files)"
+  if hooks_installed; then
+    _doc_ok "Sync hooks installed (terminal, IDE, desktop)"
+    [[ -z "$rcs" ]] || _doc_warn "Shell wrapper still in $(tr '\n' ' ' <<< "$rcs")— sessions sync twice; fix: claude-kitsync settings → Sync triggers"
+  elif [[ -n "$rcs" ]]; then
+    _doc_warn "Only the shell wrapper syncs (terminal only, not IDE/desktop) — fix: claude-kitsync settings → Sync triggers"
   else
-    _doc_warn "Shell wrapper not found — no automatic sync; run: claude-kitsync init"
+    _doc_warn "No automatic sync — fix: claude-kitsync settings → Sync triggers"
   fi
 }
 

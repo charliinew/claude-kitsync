@@ -166,81 +166,6 @@ run_test_ac7_warning_message_format() {
     "AC7: warning message contains 'skipping'"
 }
 
-# ---------------------------------------------------------------------------
-# AC4 — wrapper invokes claude with async background pull, max 2s timeout
-# ---------------------------------------------------------------------------
-
-run_test_ac4_wrapper_template_has_timeout() {
-  # The shell-wrapper template must specify `timeout 2` (or KITSYNC_TIMEOUT)
-  local template_file="$_PROJECT_ROOT/templates/shell-wrapper.sh"
-
-  if [[ ! -f "$template_file" ]]; then
-    _fail "AC4: templates/shell-wrapper.sh exists" "file missing"
-    return 0
-  fi
-
-  local content
-  content="$(cat "$template_file")"
-  assert_contains "$content" "timeout" \
-    "AC4: shell-wrapper.sh uses 'timeout' command"
-}
-
-run_test_ac4_wrapper_template_uses_background_subshell() {
-  # The wrapper must launch the pull in a background subshell (&) + disown
-  local template_file="$_PROJECT_ROOT/templates/shell-wrapper.sh"
-
-  if [[ ! -f "$template_file" ]]; then
-    _fail "AC4: templates/shell-wrapper.sh exists" "file missing"
-    return 0
-  fi
-
-  local content
-  content="$(cat "$template_file")"
-  assert_contains "$content" "disown" \
-    "AC4: wrapper uses disown to prevent blocking"
-}
-
-run_test_ac4_wrapper_template_calls_command_claude() {
-  # The wrapper must use `command claude "$@"` to avoid recursion
-  local template_file="$_PROJECT_ROOT/templates/shell-wrapper.sh"
-
-  if [[ ! -f "$template_file" ]]; then
-    _fail "AC4: templates/shell-wrapper.sh exists" "file missing"
-    return 0
-  fi
-
-  local content
-  content="$(cat "$template_file")"
-  assert_contains "$content" 'command claude' \
-    "AC4: wrapper calls 'command claude' (no recursion)"
-}
-
-run_test_ac4_background_pull_does_not_block() {
-  # Functional: the wrapper pattern launches git pull in background and returns
-  # immediately. We simulate the wrapper logic and verify it does not take >2s.
-  setup_git_claude_home
-  trap "teardown_fake_claude_home" RETURN
-
-  make_clean_tree
-
-  # Simulate wrapper's background pull against a non-reachable remote
-  # (should time out silently, not block the foreground)
-  git -C "$CLAUDE_HOME" remote add origin "git://192.0.2.1/fake.git" 2>/dev/null || true
-
-  local start_ts end_ts elapsed
-  start_ts="$(date +%s)"
-
-  # This is the wrapper pattern — background, disowned, timeout 2
-  (timeout 2 git -C "$CLAUDE_HOME" pull --rebase -q 2>/dev/null || true) &
-  disown $! 2>/dev/null || true
-
-  end_ts="$(date +%s)"
-  elapsed=$(( end_ts - start_ts ))
-
-  # The foreground must return in under 1s (the pull is in the background)
-  assert_zero "$(( elapsed < 2 ? 0 : 1 ))" \
-    "AC4: background pull pattern returns in <2s foreground time (elapsed=${elapsed}s)"
-}
 
 # ---------------------------------------------------------------------------
 # Run all tests in this module
@@ -253,8 +178,4 @@ run_sync_tests() {
   run_test_ac7_sync_pull_skips_returns_nonzero_or_zero_but_no_rebase
   run_test_ac7_clean_tree_rebase_succeeds_locally
   run_test_ac7_warning_message_format
-  run_test_ac4_wrapper_template_has_timeout
-  run_test_ac4_wrapper_template_uses_background_subshell
-  run_test_ac4_wrapper_template_calls_command_claude
-  run_test_ac4_background_pull_does_not_block
 }

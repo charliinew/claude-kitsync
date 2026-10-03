@@ -112,7 +112,17 @@ _init_remote_version() {
 
 # _init_differs <rel> — true when the local file differs from the remote's
 _init_differs() {
-  ! diff -q "$CLAUDE_HOME/$1" <(_init_remote_version "$1") &>/dev/null
+  diff -q "$CLAUDE_HOME/$1" <(_init_remote_version "$1") &>/dev/null && return 1
+  # settings.json: formatting and kitsync's own hooks are not a difference
+  if [[ "$1" == settings.json ]] && command -v python3 &>/dev/null; then
+    local a b
+    if a="$(_settings_canonical < "$CLAUDE_HOME/$1" 2>/dev/null)" && \
+       b="$(_init_remote_version "$1" | _settings_canonical 2>/dev/null)"; then
+      [[ "$a" != "$b" ]]
+      return
+    fi
+  fi
+  return 0
 }
 
 # _init_backup_local <rel> — keep the local version before the remote's
@@ -730,6 +740,16 @@ GITIGNORE
   fi
 
   # ---------------------------------------------------------------------------
+  # Step 4.9: Automatic sync (hooks in settings.json)
+  # Before the initial commit, so the hooks are in it and the tree stays clean
+  # ---------------------------------------------------------------------------
+  log_step "Setting up automatic sync..."
+  sync_trigger_setup
+  # settings.json may have just gained the hooks: keep the template identical
+  # on every machine, or each one commits its own version
+  _generate_settings_template >/dev/null 2>&1 || true
+
+  # ---------------------------------------------------------------------------
   # Step 5: Initial commit
   # ---------------------------------------------------------------------------
   log_step "Staging whitelisted files for initial commit..."
@@ -782,12 +802,6 @@ GITIGNORE
   fi
 
   # ---------------------------------------------------------------------------
-  # Step 6: Install shell wrapper
-  # ---------------------------------------------------------------------------
-  log_step "Installing shell wrapper..."
-  install_wrapper_auto
-
-  # ---------------------------------------------------------------------------
   # Step 7: Push to remote (if configured)
   # ---------------------------------------------------------------------------
   if git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null 2>&1; then
@@ -831,6 +845,10 @@ GITIGNORE
   fi
 
   log_success "claude-kitsync init complete!"
-  log_info "Invoke 'claude' normally — sync happens in the background."
-  _print_reload_notice
+  if [[ -n "$(_wrapper_rc_files)" ]]; then
+    log_info "Invoke 'claude' normally — sync happens in the background."
+    _print_reload_notice
+  else
+    log_info "Use Claude Code as usual (terminal, IDE or desktop) — each session syncs in the background."
+  fi
 }

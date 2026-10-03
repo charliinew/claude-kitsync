@@ -15,9 +15,9 @@ curl -fsSL https://raw.githubusercontent.com/charliinew/claude-kitsync/main/inst
 The installer will:
 1. Install the `claude-kitsync` binary
 2. Ask for your git remote URL (or skip if you don't have one yet)
-3. Initialise `~/.claude` as a git repo + install the shell wrapper
+3. Initialise `~/.claude` as a git repo + add the sync hooks to `~/.claude/settings.json`
 
-Then run the one activation command it prints (e.g. `source ~/.zshrc`) and you're done.
+Open a new terminal (for the `claude-kitsync` command itself) and you're done: every Claude Code session — terminal, IDE extension or desktop app — now syncs.
 
 **If you already know your remote URL** — the variable goes on the `bash` side of the pipe:
 
@@ -57,7 +57,7 @@ Use one install method only: Homebrew (`brew upgrade claude-kitsync`) or the scr
 
 | Command | Description |
 |---|---|
-| `claude-kitsync init [--remote <url>]` | Initialise `~/.claude` as git repo + install shell wrapper |
+| `claude-kitsync init [--remote <url>]` | Initialise `~/.claude` as git repo + add the sync hooks |
 | `claude-kitsync push [-m "message"] [--dry-run]` | Commit and push whitelisted changes; `--dry-run` previews without committing |
 | `claude-kitsync pull [--force]` | Pull manually from remote (skips if dirty working tree) |
 | `claude-kitsync status` | Show modified files and ahead/behind count |
@@ -69,26 +69,26 @@ Use one install method only: Homebrew (`brew upgrade claude-kitsync`) or the scr
 | `claude-kitsync install [--skill] <url>` | Merge a public kit into `~/.claude` (no overwrite of local config); `--skill` installs skills only |
 | `claude-kitsync profile [list\|add\|switch\|remove]` | Manage named remotes for multi-environment sync (work, perso…) |
 | `claude-kitsync encrypt [enable\|disable\|rotate\|status]` | Encrypt `settings.json` with AES-256 before push (opt-in) |
-| `claude-kitsync settings` | Interactive menu to change pull/push mode, remote URL, wrapper |
+| `claude-kitsync settings` | Interactive menu to change pull/push mode, remote URL, sync triggers |
 | `claude-kitsync doctor` | Diagnose the health of your setup |
 | `claude-kitsync upgrade` | Update claude-kitsync to the latest release (signature checked, release notes shown) |
-| `claude-kitsync uninstall [--yes]` | Remove claude-kitsync (binary, PATH, shell wrapper); `~/.claude` is kept |
+| `claude-kitsync uninstall [--yes]` | Remove claude-kitsync (binary, PATH, sync hooks); `~/.claude` is kept |
 
 ---
 
 ## How It Works
 
-**Shell wrapper** — `claude-kitsync init` injects a `claude()` function into your `~/.zshrc` (or `~/.bashrc`):
+**Claude Code hooks** — `claude-kitsync init` adds three entries to `~/.claude/settings.json`. Claude Code runs them in every session, wherever it runs (terminal, IDE extensions, desktop app); each one only starts a background job, so Claude never waits on the network:
 
-```bash
-claude() {
-  # Background: pull latest config (max 2s, then timeout)
-  ( timeout 2 git -C ~/.claude pull --rebase --autostash -q ) &
-  disown
-  # Foreground: run claude immediately, no wait
-  command claude "$@"
-}
-```
+| Hook | What kitsync does |
+|---|---|
+| `SessionStart` | pulls in the background, and shows any sync notice (conflict, file not pushed, config updated) |
+| `SessionEnd` | pushes in the background (default push mode) |
+| `Stop` | in timer mode only: pushes at most every N minutes |
+
+Pulled changes to `settings.json` apply from the next session. The background pull never touches files you edited and haven't pushed yet, and a push never sends a half-merged file or an invalid `settings.json`. Two syncs never run at the same time on one machine.
+
+Without `python3` (needed to edit `settings.json`), kitsync falls back to a `claude()` function in your `~/.zshrc`/`~/.bashrc`, which only syncs sessions started from a terminal. Versions before 1.2.0 used that function; upgrading replaces it with the hooks.
 
 **Git-in-~/.claude** — your config directory becomes a standard git repo. Only explicitly whitelisted files are committed:
 
@@ -119,7 +119,7 @@ The remote. `pull` rebases your local commits on top of the remote with `-X ours
 
 ### My `settings.json` has broken paths after pulling on a new machine.
 
-Run `claude-kitsync pull` once — it registers the path filter for this machine and rewrites any foreign `/Users/<name>/.claude` or `/home/<name>/.claude` path in `settings.json` to your own `$HOME`. The background wrapper does the same after each auto-pull.
+Run `claude-kitsync pull` once — it registers the path filter for this machine and rewrites any foreign `/Users/<name>/.claude` or `/home/<name>/.claude` path in `settings.json` to your own `$HOME`. The background pull does the same after each sync.
 
 ### Can I use this with a private repo?
 
@@ -159,9 +159,9 @@ A readable copy of `settings.json` with `__CLAUDE_HOME__` / `__HOME__` tokens, r
 
 Yes: `CLAUDE_HOME=/path/to/other-claude claude-kitsync status` or export it permanently in your shell rc.
 
-### `claude-kitsync doctor` says my wrapper is missing
+### `claude-kitsync doctor` says there is no automatic sync
 
-Run `claude-kitsync init` again — it's idempotent. It will add the wrapper block without duplicating it.
+Run `claude-kitsync settings` → Sync triggers → Install / repair hooks. It's idempotent, keeps your own hooks, and backs up `settings.json` first.
 
 ### How do I uninstall completely?
 
@@ -170,7 +170,7 @@ claude-kitsync uninstall
 exec $SHELL
 ```
 
-This removes the binary, PATH entry, and shell wrapper in one command.
+This removes the binary, PATH entry and sync hooks in one command (`~/.claude` and its remote are kept).
 
 ---
 

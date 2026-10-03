@@ -214,6 +214,10 @@ _shell_stamp_file() {
 # Runs in the NEW version (upgrade calls the freshly installed binary).
 post_upgrade() {
   local from="${1:-}"
+  # 1.2.0: sync moved from the claude() shell wrapper to Claude Code hooks
+  if declare -F sync_trigger_setup >/dev/null && [[ -n "$(_wrapper_rc_files)" ]]; then
+    sync_trigger_setup
+  fi
   refresh_shell_setup
   local stamp
   stamp="$(_shell_stamp_file)"
