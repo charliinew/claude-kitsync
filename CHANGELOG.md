@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.14] — 2026-10-04
+
+### Fixed
+- CI failed on 1.2.13: the bash completion uses `COMPREPLY=($(compgen …))`, which ShellCheck flags at warning level; it is the completion idiom (bash 3.2 has no `mapfile`), now documented and allowed.
+- **Completion of `restore`** listed no backup (`.zshrc…` ones are hidden files).
+
+### Changed
+- **Completions know every command**: `profile` subcommands and this machine's profile names, `encrypt` subcommands, `install --skill`, `restore` backups, `-h`/`--version`; zsh descriptions match what commands do today.
+
 ## [1.2.13] — 2026-10-04
 
 ### Changed
