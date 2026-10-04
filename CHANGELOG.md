@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.7] — 2026-10-04
+
+### Fixed
+- **After a key rotation, other machines silently forked the encrypted settings**: unable to decrypt the new `settings.json.enc`, a machine with the old key kept its stale settings without a word, then re-encrypted them with its old key and pushed them — leaving the remote with a version the rotating machine couldn't read. The synced config now records the key's fingerprint (the first 16 hex chars of its SHA-256; it reveals nothing about the key). A machine without the current key never encrypts or overwrites anything, is told at its next session, and `doctor` reports it as an error.
+- **Once the right key is copied, settings catch up by themselves** at the next sync (the stale local file is backed up), instead of waiting for the next remote change.
+- `encrypt rotate` re-encrypts the settings with the new key right away.
+- A failed decryption is reported instead of ignored.
+
 ## [1.2.6] — 2026-10-04
 
 ### Fixed
