@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.11] — 2026-10-04
+
+### Fixed
+- **Kits brought their author's paths**: a hook calling `/Users/alice/.claude/hooks/check.py` was installed as is and broke. Text files from a kit now point at this machine's `~/.claude` (path tokens included).
+- **Kits brought dependencies and secrets**: `node_modules/`, `.venv/`, `.env`, keys, logs and `.git/` inside a kit are no longer copied.
+- **Backups of files replaced by a kit landed in synced folders** (`hooks/run.sh.bak.2026…`) and were pushed. They now go to `.kitsync/backups/install-<date>/`.
+- A `--skill` URL with `..` could copy a folder from outside the cloned repository.
+- Without a terminal, a conflicting file is kept (and said so) instead of failing silently; a failed clone shows git's error.
+
 ## [1.2.10] — 2026-10-04
 
 ### Fixed
