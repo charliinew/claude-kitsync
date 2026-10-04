@@ -6,7 +6,7 @@ set -euo pipefail
 # _profile_get_active — return the active profile name (or empty string)
 # ---------------------------------------------------------------------------
 _profile_get_active() {
-  local cfg="$CLAUDE_HOME/.kitsync/config"
+  local cfg="$CLAUDE_HOME/.kitsync/local"
   [[ -f "$cfg" ]] || { printf ''; return 0; }
   grep '^KITSYNC_PROFILE=' "$cfg" 2>/dev/null | cut -d= -f2- || printf ''
 }
@@ -15,7 +15,7 @@ _profile_get_active() {
 # _profile_list_names — return newline-separated list of profile names (lowercase)
 # ---------------------------------------------------------------------------
 _profile_list_names() {
-  local cfg="$CLAUDE_HOME/.kitsync/config"
+  local cfg="$CLAUDE_HOME/.kitsync/local"
   [[ -f "$cfg" ]] || { printf ''; return 0; }
   grep '^KITSYNC_PROFILES_[A-Z0-9_]*_URL=' "$cfg" 2>/dev/null \
     | sed 's/^KITSYNC_PROFILES_//;s/_URL=.*//' \
@@ -31,7 +31,7 @@ _profile_get_url() {
   [[ -n "$name" ]] || { printf ''; return 0; }
   local upper_name
   upper_name="$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')"
-  local cfg="$CLAUDE_HOME/.kitsync/config"
+  local cfg="$CLAUDE_HOME/.kitsync/local"
   [[ -f "$cfg" ]] || { printf ''; return 0; }
   grep "^KITSYNC_PROFILES_${upper_name}_URL=" "$cfg" 2>/dev/null \
     | cut -d= -f2- || printf ''
@@ -39,7 +39,7 @@ _profile_get_url() {
 
 # ---------------------------------------------------------------------------
 # _profile_rewrite_config <active_profile> <name> <url>
-# Atomically rewrites .kitsync/config:
+# Atomically rewrites .kitsync/local (the profile registry is per machine):
 #   - Filters out KITSYNC_PROFILE= and KITSYNC_PROFILES_<NAME>_URL= lines
 #   - Appends updated KITSYNC_PROFILE=<active_profile>
 #   - Appends updated KITSYNC_PROFILES_<NAME>_URL=<url>
@@ -51,7 +51,7 @@ _profile_rewrite_config() {
   local name="${2:-}"
   local url="${3:-}"
 
-  local cfg="$CLAUDE_HOME/.kitsync/config"
+  local cfg="$CLAUDE_HOME/.kitsync/local"
   mkdir -p "$CLAUDE_HOME/.kitsync"
   [[ -f "$cfg" ]] || touch "$cfg"
 
@@ -90,7 +90,7 @@ _profile_delete_config() {
 
   local upper_name
   upper_name="$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')"
-  local cfg="$CLAUDE_HOME/.kitsync/config"
+  local cfg="$CLAUDE_HOME/.kitsync/local"
   [[ -f "$cfg" ]] || return 0
 
   local tmp
@@ -131,36 +131,79 @@ _profile_switch() {
     return 1
   fi
 
-  local current_active
-  current_active="$(_profile_get_active)"
-  if [[ "$current_active" == "$name" ]]; then
+  local current
+  current="$(_profile_get_active)"
+  if [[ "$current" == "$name" ]]; then
     log_info "Already on profile: $name"
     return 0
   fi
 
-  # Warn if dirty (non-blocking)
-  if _is_dirty; then
-    log_warn "Uncommitted changes detected — they will push to the new remote on next sync."
-  fi
+  # A profile is a whole config: switching swaps this machine's synced files
+  # for the profile's. Changing only the remote would push one profile's
+  # files (personal agents…) into the other's repository.
 
-  # Update git remote
-  if git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null 2>&1; then
+  # 1. The current profile's pending changes go to its own remote first
+  if _has_remote && git -C "$CLAUDE_HOME" rev-parse -q --verify HEAD >/dev/null; then
+    log_step "Saving profile '${current:-current}' to its remote first..."
+    if ! sync_push "$(_sync_commit_msg "before switching to $name:")"; then
+      log_error "Could not push '${current:-current}' — nothing was switched. Check: claude-kitsync status"
+      return 1
+    fi
+  fi
+  _sync_lock 30 || die "Another kitsync sync is running on this machine — try again in a moment."
+
+  # 2. Keep a copy of every synced file as it is on disk (local-only edits too)
+  local bak f
+  bak="$CLAUDE_HOME/.kitsync/backups/profile-${current:-none}-$(date '+%Y%m%dT%H%M%S')"
+  while IFS= read -r -d '' f; do
+    [[ -f "$CLAUDE_HOME/$f" ]] || continue
+    mkdir -p "$(dirname "$bak/$f")"
+    cp -p "$CLAUDE_HOME/$f" "$bak/$f"
+  done < <(git -C "$CLAUDE_HOME" ls-files -z 2>/dev/null)
+
+  # 3. Point origin to the profile's remote; forget the old remote's branches
+  local old_url
+  old_url="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || true)"
+  if [[ -n "$old_url" ]]; then
     git -C "$CLAUDE_HOME" remote set-url origin "$url"
   else
     git -C "$CLAUDE_HOME" remote add origin "$url"
   fi
+  git -C "$CLAUDE_HOME" for-each-ref --format='%(refname)' refs/remotes/origin | \
+    while IFS= read -r f; do git -C "$CLAUDE_HOME" update-ref -d "$f"; done
+  local err
+  if ! err="$(_git_net fetch -q origin 2>&1)"; then
+    [[ -n "$old_url" ]] && git -C "$CLAUDE_HOME" remote set-url origin "$old_url"
+    git -C "$CLAUDE_HOME" fetch -q origin 2>/dev/null || true
+    log_error "Cannot reach the '$name' remote — nothing was switched:"
+    printf '%s\n' "$err" | head -3 | sed 's/^/    /' >&2
+    return 1
+  fi
 
-  # Update config
-  local upper_name
-  upper_name="$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')"
-  local cfg="$CLAUDE_HOME/.kitsync/config"
-  local tmp
-  tmp="$(mktemp "${cfg}.XXXXXX")"
-  grep -v '^KITSYNC_PROFILE=' "$cfg" 2>/dev/null > "$tmp" || true
-  printf 'KITSYNC_PROFILE=%s\n' "$name" >> "$tmp"
-  mv "$tmp" "$cfg"
+  local branch
+  branch="$(git -C "$CLAUDE_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+  if git -C "$CLAUDE_HOME" rev-parse -q --verify "origin/$branch" >/dev/null; then
+    # 4a. The profile exists: this machine takes its config
+    git -C "$CLAUDE_HOME" reset -q --hard "origin/$branch"
+    git -C "$CLAUDE_HOME" branch -q --set-upstream-to="origin/$branch" "$branch" 2>/dev/null || true
+    _sync_prepare_repo
+    _sync_after_pull
+    log_success "Switched to profile '$name': this machine now has its config."
+  else
+    # 4b. A new, empty profile starts from this machine's config
+    if ! err="$(git -C "$CLAUDE_HOME" push -q -u origin "HEAD:$branch" 2>&1)"; then
+      log_warn "Switched, but the first push to '$name' failed:"
+      printf '%s\n' "$err" | head -3 | sed 's/^/    /' >&2
+    fi
+    log_success "Switched to profile '$name' (it was empty: it starts with this machine's config)."
+  fi
+  _profile_rewrite_config "$name" "" ""
+  log_info "Files as they were under '${current:-the previous profile}': $bak"
 
-  log_success "Switched to profile: $name  ($url)"
+  # The new profile's settings.json may lack the sync hooks
+  if declare -F hooks_install >/dev/null && [[ -z "$(_wrapper_rc_files 2>/dev/null)" ]]; then
+    hooks_install || true
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -204,11 +247,13 @@ _profile_add() {
   _profile_rewrite_config "${current_active:-}" "$name" "$url"
   log_success "Profile '$name' added."
 
-  # Offer to switch immediately
-  local switch_choice
-  switch_choice="$(_select_menu "Switch to '$name' now?" "Yes" "No")"
-  if [[ "$switch_choice" == "1" ]]; then
-    _profile_switch "$name"
+  # Offer to switch — only to someone who can answer
+  if _has_tty; then
+    local switch_choice
+    switch_choice="$(_select_menu "Switch to '$name' now? (this machine takes its config)" "No" "Yes")"
+    [[ "$switch_choice" == "2" ]] && _profile_switch "$name"
+  else
+    log_info "Switch to it with: claude-kitsync profile switch $name"
   fi
 }
 
@@ -295,6 +340,7 @@ _profile_list_all_display() {
 # ---------------------------------------------------------------------------
 cmd_profile() {
   require_git_repo
+  _config_migrate_local >/dev/null 2>&1 || true   # registry from before 1.2.8
 
   local sub="${1:-}"
 

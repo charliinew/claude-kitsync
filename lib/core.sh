@@ -108,7 +108,11 @@ _has_tty() {
 # ---------------------------------------------------------------------------
 KITSYNC_LOCAL_KEYS="KITSYNC_PULL_MODE KITSYNC_PUSH_MODE KITSYNC_PUSH_TIMER KITSYNC_PUSH_ITEMS KITSYNC_PULL_ITEMS KITSYNC_UPGRADE_CHANNEL KITSYNC_MACHINE_NAME"
 
-_is_local_key() { [[ " $KITSYNC_LOCAL_KEYS " == *" $1 "* ]]; }
+# The profile registry (which remotes this machine knows, which one is
+# active) is machine-local too: each remote has its own synced config
+_is_local_key() {
+  [[ " $KITSYNC_LOCAL_KEYS " == *" $1 "* || "$1" == KITSYNC_PROFILE || "$1" == KITSYNC_PROFILES_* ]]
+}
 
 # _cfg_file <key> — the file that holds <key>
 _cfg_file() {
@@ -151,18 +155,23 @@ _config_set() {
 # _config_migrate_local — move this machine's keys out of the synced file
 # (each machine keeps the values it had). Returns 0 when the synced file changed.
 _config_migrate_local() {
-  local cfg="$CLAUDE_HOME/.kitsync/config" key val moved=1
+  local cfg="$CLAUDE_HOME/.kitsync/config" line key val moved=1
   [[ -f "$cfg" ]] || return 1
-  for key in $KITSYNC_LOCAL_KEYS; do
-    grep -q "^$key=" "$cfg" 2>/dev/null || continue
-    val="$(grep "^$key=" "$cfg" | tail -1 | cut -d= -f2-)"
+  while IFS= read -r line; do
+    key="${line%%=*}"
+    _is_local_key "$key" || continue
+    val="${line#*=}"
     grep -q "^$key=" "$CLAUDE_HOME/.kitsync/local" 2>/dev/null || _config_set "$key" "$val"
     moved=0
-  done
+  done < <(grep -E '^KITSYNC_[A-Z0-9_]+=' "$cfg" 2>/dev/null || true)
   [[ $moved -eq 0 ]] || return 1
   local tmp
   tmp="$(mktemp "${cfg}.XXXXXX")"
-  grep -vE "^($(tr ' ' '|' <<< "$KITSYNC_LOCAL_KEYS"))=" "$cfg" > "$tmp" || true
+  while IFS= read -r line; do
+    key="${line%%=*}"
+    [[ "$line" == KITSYNC_*=* ]] && _is_local_key "$key" && continue
+    printf '%s\n' "$line"
+  done < "$cfg" > "$tmp"
   sed -i.bak 's/^# claude-kitsync sync preferences$/# claude-kitsync — shared by all your machines (per-machine choices: .kitsync\/local)/' "$tmp" && rm -f "$tmp.bak"
   mv "$tmp" "$cfg"
   return 0

@@ -67,7 +67,7 @@ Use one install method only: Homebrew (`brew upgrade claude-kitsync`) or the scr
 | `claude-kitsync restore` | Restore a rc file from a timestamped backup |
 | `claude-kitsync setup-kit [--print]` | Wire the starter kit's hooks and status line into `settings.json` (`--print`: show the snippet instead) |
 | `claude-kitsync install [--skill] <url>` | Merge a public kit into `~/.claude` (no overwrite of local config); `--skill` installs skills only |
-| `claude-kitsync profile [list\|add\|switch\|remove]` | Manage named remotes for multi-environment sync (work, perso…) |
+| `claude-kitsync profile [list\|add\|switch\|remove]` | Separate configs in separate repos (work, perso…). `switch` saves the current profile to its repo, then gives this machine the other profile's config (files backed up first); an empty repo starts with this machine's config |
 | `claude-kitsync encrypt [enable\|disable\|rotate\|status]` | Encrypt `settings.json` with AES-256 before push (opt-in) |
 | `claude-kitsync settings` | Interactive menu to change pull/push mode, remote URL, sync triggers |
 | `claude-kitsync doctor` | Diagnose the health of your setup |

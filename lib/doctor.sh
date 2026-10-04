@@ -42,6 +42,7 @@ _doc_check_repo() {
   fi
 
   local profile purl
+  _config_migrate_local >/dev/null 2>&1 || true   # registry from before 1.2.8
   profile="$(_profile_get_active 2>/dev/null || true)"
   if [[ -n "$profile" ]]; then
     purl="$(_profile_get_url "$profile" 2>/dev/null || true)"
