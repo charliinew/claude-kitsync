@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.12] — 2026-10-04
+
+### Fixed
+- **`publish` never worked**: it crashed while writing the README (`printf` read the `- ` of a list item as an option).
+- **`publish` would have leaked far more than intended**, with the crash fixed: it copied whole folders (`node_modules/`, `.env`, keys, claude.ai account skills, ignored data) with your absolute paths, defaulted to a **public** repository, and without a terminal took every default — publishing everything publicly without a question.
+
+### Changed
+- **`publish` publishes exactly what kitsync syncs** (the allowlist, without dependencies, caches, secrets, logs or account skills), leaves out files that look like they hold a secret, replaces your paths with `__CLAUDE_HOME__` / `__HOME__` (which `install` expands), is private unless you choose public, shows the full list and asks before anything leaves the machine, and refuses to run without a terminal. The README gets the real install URL; git and gh errors are shown.
+
 ## [1.2.11] — 2026-10-04
 
 ### Fixed
