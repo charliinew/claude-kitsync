@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.8] — 2026-10-04
+
+### Fixed
+- **Switching profile pushed one profile's files into the other's repository**: `profile switch` only changed the remote URL, so the next sync merged, say, your personal agents into the work repo. Switching now pushes the current profile to its own repository, backs up this machine's synced files, then gives the machine the other profile's config. An empty repository starts with this machine's config.
+- **The profile list was replaced when switching**: it lived in the synced config, i.e. in each profile's repository. The registry (known profiles, active one) is now per machine, in `.kitsync/local`; existing setups migrate automatically.
+- `profile add` without a terminal switched to the new profile on its own; it no longer does.
+
 ## [1.2.7] — 2026-10-04
 
 ### Fixed
