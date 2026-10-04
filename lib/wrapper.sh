@@ -134,59 +134,82 @@ _render_wrapper() {
 }
 
 # ---------------------------------------------------------------------------
-# cmd_restore — interactively restore a rc file from a kitsync backup
+# _restore_target <backup file> — where a kitsync backup goes back to (empty
+# for anything unknown: never guess a path in $HOME)
+# ---------------------------------------------------------------------------
+_restore_target() {
+  local bn stem name
+  bn="$(basename "$1")"     # .zshrc.20260503T131121.bak
+  stem="${bn%.bak}"         # .zshrc.20260503T131121
+  name="${stem%.*}"         # .zshrc
+  case "$name" in
+    .zshrc)         printf '%s/.zshrc' "${ZDOTDIR:-$HOME}" ;;
+    .bashrc)        printf '%s/.bashrc' "$HOME" ;;
+    .bash_profile)  printf '%s/.bash_profile' "$HOME" ;;
+    settings.json)  printf '%s/settings.json' "${CLAUDE_HOME:-$HOME/.claude}" ;;
+    .gitignore)     printf '%s/.gitignore' "${CLAUDE_HOME:-$HOME/.claude}" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# cmd_restore [backup] — put back a file kitsync backed up before editing it
+# (shell rc files, settings.json, ~/.claude/.gitignore). Without a terminal,
+# the backup must be named: nothing is picked by default.
 # ---------------------------------------------------------------------------
 cmd_restore() {
   local backup_dir="${CLAUDE_HOME:-$HOME/.claude}/.kitsync/backups"
+  local selected="${1:-}"
 
   if [[ ! -d "$backup_dir" ]]; then
     log_error "No backup directory found: $backup_dir"
-    log_info  "Backups are created automatically when claude-kitsync modifies your rc file."
+    log_info  "Backups are created automatically when claude-kitsync modifies a file."
     return 1
   fi
 
-  local backups=()
+  local backups=() f
   while IFS= read -r f; do
-    [[ -n "$f" ]] && backups+=("$f")
-  done < <(ls -t "$backup_dir"/*.bak 2>/dev/null || true)
+    [[ -n "$f" && -n "$(_restore_target "$f")" ]] && backups+=("$f")
+  done < <(ls -t "$backup_dir"/*.bak "$backup_dir"/.*.bak 2>/dev/null || true)
 
   if [[ ${#backups[@]} -eq 0 ]]; then
     log_error "No backups found in $backup_dir"
     return 1
   fi
 
-  # Build human-readable labels: ".zshrc  —  2026-05-03 13:11:21"
-  local labels=()
-  for f in "${backups[@]}"; do
-    local bn stem ts_raw rc_name ts_fmt
-    bn="$(basename "$f")"          # .zshrc.20260503T131121.bak
-    stem="${bn%.bak}"              # .zshrc.20260503T131121
-    ts_raw="${stem##*.}"           # 20260503T131121
-    rc_name="${stem%.*}"           # .zshrc
-    ts_fmt="${ts_raw:0:4}-${ts_raw:4:2}-${ts_raw:6:2} ${ts_raw:9:2}:${ts_raw:11:2}:${ts_raw:13:2}"
-    labels+=("${rc_name}  —  ${ts_fmt}")
-  done
+  if [[ -n "$selected" ]]; then
+    [[ "$selected" == */* ]] || selected="$backup_dir/$selected"
+    [[ -f "$selected" && -n "$(_restore_target "$selected")" ]] || \
+      die "Not a kitsync backup: $1 (see: ls \"$backup_dir\")"
+  elif ! _has_tty; then
+    log_error "No terminal to choose a backup. Name it: claude-kitsync restore <file>"
+    printf '%s\n' "${backups[@]}" | head -10 | xargs -n1 basename | sed 's/^/    /' >&2
+    return 1
+  else
+    # ".zshrc  —  2026-05-03 13:11:21  →  ~/.zshrc"
+    local labels=() bn stem ts
+    for f in "${backups[@]}"; do
+      bn="$(basename "$f")"; stem="${bn%.bak}"; ts="${stem##*.}"
+      labels+=("${stem%.*}  —  ${ts:0:4}-${ts:4:2}-${ts:6:2} ${ts:9:2}:${ts:11:2}:${ts:13:2}  →  $(_restore_target "$f" | sed "s|^$HOME|~|")")
+    done
+    local idx
+    idx="$(_select_menu "Select a backup to restore" "${labels[@]}")"
+    selected="${backups[$((idx - 1))]}"
+  fi
 
-  local idx
-  idx="$(_select_menu "Select a backup to restore" "${labels[@]}")"
-  local selected="${backups[$((idx - 1))]}"
-
-  # Derive target rc path from backup filename
-  local bn stem rc_name target_rc
-  bn="$(basename "$selected")"
-  stem="${bn%.bak}"
-  rc_name="${stem%.*}"
-  case "$rc_name" in
-    .zshrc)  target_rc="${ZDOTDIR:-$HOME}/.zshrc" ;;
-    .bashrc) target_rc="$HOME/.bashrc" ;;
-    *)       target_rc="$HOME/$rc_name" ;;
+  local target
+  target="$(_restore_target "$selected")"
+  log_info "Restoring $target from $(basename "$selected")..."
+  # The current version is backed up too, so a restore can be undone
+  if [[ "$target" == */.zshrc || "$target" == */.bashrc || "$target" == */.bash_profile ]]; then
+    _backup_rc "$target"
+  elif [[ -f "$target" ]]; then
+    cp -p "$target" "$backup_dir/$(basename "$target").$(date '+%Y%m%dT%H%M%S').bak"
+  fi
+  cat "$selected" > "$target"   # in place: a symlinked file stays a symlink
+  log_success "Restored: $target"
+  case "$target" in
+    */.zshrc|*/.bashrc|*/.bash_profile) log_info "Run 'source $target' or open a new terminal to apply." ;;
   esac
-
-  log_info "Restoring $target_rc from $(basename "$selected")..."
-  _backup_rc "$target_rc"
-  cp "$selected" "$target_rc"
-  log_success "Restored: $target_rc"
-  log_info "Run 'source $target_rc' or open a new terminal to apply."
 }
 
 # ---------------------------------------------------------------------------
