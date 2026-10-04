@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.4] — 2026-10-04
+
+### Fixed
+- **Path tokens cut into other paths sharing the prefix**: with `HOME=/Users/al`, `/Users/alice/x` was stored as `__HOME__ice/x` and became `/home/bobice/x` on another machine. A path is now replaced only where it ends.
+- `__CLAUDE_HOME__` followed `$HOME/.claude` even when `CLAUDE_HOME` points elsewhere; it now maps one machine's `CLAUDE_HOME` to the other's.
+
+### Changed
+- **Portable paths cover synced text files, not only `settings.json`**: hook scripts, agents, skills and scripts (`.json`, `.md`, `.sh`, `.py`, `.ts`, `.js`, `.mjs`, `.cjs`, `.toml`, `.yaml`, `.yml`, `.txt`). Files already committed with this machine's paths are migrated in a single commit, without touching pending local edits.
+
 ## [1.2.3] — 2026-10-04
 
 ### Fixed
