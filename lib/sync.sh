@@ -123,6 +123,8 @@ _sync_prepare_repo() {
     git -C "$CLAUDE_HOME" add -- .kitsync/config 2>/dev/null && \
       git -C "$CLAUDE_HOME" commit -q -m "kitsync: track sync preferences" -- .kitsync/config 2>/dev/null || true
   fi
+  # Encryption key copied after a mismatch: catch settings.json up
+  crypto_recover_key 2>/dev/null || true
   # 1.2.1: per-machine choices move to the never-synced .kitsync/local
   if _config_migrate_local && \
      git -C "$CLAUDE_HOME" ls-files --error-unmatch .kitsync/config &>/dev/null; then

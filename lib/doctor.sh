@@ -142,6 +142,9 @@ _doc_check_safety() {
     if [[ ! -f "$key" ]]; then
       _doc_err "Encryption enabled but key file missing: $key"
       _doc_hint "Copy the key from another machine, or: claude-kitsync encrypt enable"
+    elif ! _crypto_key_ok; then
+      _doc_err "This machine's encryption key is not the current one — settings.json is not synced"
+      _doc_hint "Copy $key from a machine that has the current key"
     elif git -C "$CLAUDE_HOME" ls-files --error-unmatch settings.json &>/dev/null; then
       _doc_err "Encryption enabled but settings.json is tracked in plaintext"
       _doc_hint "git -C \"$CLAUDE_HOME\" rm --cached settings.json && claude-kitsync push"
