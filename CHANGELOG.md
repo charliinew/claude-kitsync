@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.13] — 2026-10-04
+
+### Changed
+- **Releases run the test suite before anything is built or signed**: a tag pushed on a broken commit no longer publishes.
+- **GitHub Actions pinned to commit SHAs** (the release job holds the signing key: a moved tag can no longer change what runs there), kept current by Dependabot.
+- CI runs with a read-only token, cancels superseded runs, checks shell syntax (bash, and zsh for the shell wrapper), and ShellCheck now fails on warnings, not only errors (the five remaining warnings are fixed).
+
 ## [1.2.12] — 2026-10-04
 
 ### Fixed
