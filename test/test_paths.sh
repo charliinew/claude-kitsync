@@ -233,6 +233,45 @@ EOF
 # ---------------------------------------------------------------------------
 # Run all tests in this module
 # ---------------------------------------------------------------------------
+# _tok <home> <claude_home> <direction> — paths token stream as that user
+_tok() {
+  HOME="$1" CLAUDE_HOME="$2" _P="$_PROJECT_ROOT/lib" bash -c '
+    source "$_P/core.sh"; source "$_P/paths.sh"
+    if [[ "$0" == clean ]]; then paths_tokenize_stream; else paths_detokenize_stream; fi' "$3"
+}
+
+run_test_tok_boundaries() {
+  local in out
+  in='{"a":"/Users/al/.bun/bin/bun","b":"/Users/alice/x","c":"/Users/al","d":"/Users/al/.claude/h.py"}'
+  out="$(printf '%s\n' "$in" | _tok /Users/al /Users/al/.claude clean)"
+  assert_contains "$out" '"b":"/Users/alice/x"' "TOK: another user's path sharing the prefix is left alone"
+  assert_contains "$out" '"a":"__HOME__/.bun/bin/bun"' "TOK: home path tokenized"
+  assert_contains "$out" '"c":"__HOME__"' "TOK: bare home path tokenized"
+  assert_contains "$out" '"d":"__CLAUDE_HOME__/h.py"' "TOK: claude home tokenized first"
+  out="$(printf '%s\n' "$out" | _tok /home/bob /home/bob/.claude smudge)"
+  assert_eq '{"a":"/home/bob/.bun/bin/bun","b":"/Users/alice/x","c":"/home/bob","d":"/home/bob/.claude/h.py"}' "$out" \
+    "TOK: round trip to another machine"
+  out="$(printf '/srv/claude/x\n' | _tok /Users/al /srv/claude clean | _tok /home/bob /data/claude smudge)"
+  assert_eq "/data/claude/x" "$out" "TOK: custom CLAUDE_HOME maps to the other machine's"
+}
+
+run_test_tok_text_files() {
+  local root ch
+  root="$(mktemp -d)"; ch="$root/home/.claude"
+  mkdir -p "$ch/hooks"
+  git -C "$ch" init -q -b main
+  printf 'python3 %s/home/.claude/hooks/x.py\n' "$root" > "$ch/hooks/run.sh"
+  git -C "$ch" add -A && git -C "$ch" -c user.email=t@t -c user.name=t commit -qm abs
+  HOME="$root/home" CLAUDE_HOME="$ch" _P="$_PROJECT_ROOT/lib" GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t \
+    GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t bash -c \
+    'source "$_P/core.sh"; source "$_P/paths.sh"; paths_filter_setup' >/dev/null 2>&1
+  assert_contains "$(git -C "$ch" show HEAD:hooks/run.sh)" "__CLAUDE_HOME__/hooks/x.py" \
+    "TOK: hook scripts are stored with portable paths"
+  assert_contains "$(cat "$ch/hooks/run.sh")" "$root/home/.claude/hooks/x.py" "TOK: working copy keeps real paths"
+  assert_eq "" "$(git -C "$ch" status --porcelain)" "TOK: migrated file does not look modified"
+  rm -rf "$root"
+}
+
 run_paths_tests() {
   printf "\n=== test_paths.sh (AC6) ===\n"
   run_test_ac6_sed_replaces_foreign_user_path
@@ -241,4 +280,6 @@ run_paths_tests() {
   run_test_ac6_sed_does_not_corrupt_non_path_content
   run_test_ac6_sed_idempotent_with_local_home
   run_test_ac6_normalize_via_lib_if_available
+  run_test_tok_boundaries
+  run_test_tok_text_files
 }
