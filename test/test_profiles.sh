@@ -38,7 +38,7 @@ run_test_pr_switch_swaps_config() {
   assert_eq "0" "$(_pr_work_files | grep -c 'perso.md')" "PR: personal files never reach the work repository"
   assert_eq "# work rules" "$(cat "$ca/CLAUDE.md")" "PR: this machine now has the work config"
   assert_eq "no" "$([[ -f "$ca/agents/perso.md" ]] && echo yes || echo no)" "PR: the personal agent left the working copy"
-  assert_file_exists "$(ls -d "$ca"/.kitsync/backups/profile-default-*/agents/perso.md 2>/dev/null | head -1)" \
+  assert_file_exists "$(ls -d "$ca"/.kitsync/backups/switch-*/agents/perso.md 2>/dev/null | head -1)" \
     "PR: previous profile's files backed up"
   assert_contains "$(_as "$_AS_A" profile list)" "work" "PR: profile registry survives the switch"
 
@@ -58,10 +58,30 @@ run_test_pr_empty_profile_seeded() {
   rm -rf "$_AS_ROOT"
 }
 
+run_test_pr_settings_remote() {
+  _pr_setup
+  local ca="$_AS_A/.claude"
+  # settings → Remote & Repository → "Enter a URL manually" → the work repo
+  HOME="$_AS_A" ZDOTDIR="$_AS_A" CLAUDE_HOME="$ca" XDG_STATE_HOME="$_AS_A/.state" \
+    KITSYNC_ROOT="$_PROJECT_ROOT" _URL="$_PR_WORK" bash -c '
+      for l in core paths profiles crypto sync wrapper init hooks settings; do source "$KITSYNC_ROOT/lib/$l.sh"; done
+      gh() { return 1; }
+      _select_menu() { printf 1; }
+      _read_tty() { printf "%s" "$_URL"; }
+      set +e
+      _settings_remote' </dev/null >/dev/null 2>&1
+  _as "$_AS_A" push --auto x >/dev/null
+  assert_eq "0" "$(_pr_work_files | grep -c 'perso.md')" \
+    "PR: changing the remote in settings never merges two configs"
+  assert_eq "# work rules" "$(cat "$ca/CLAUDE.md")" "PR: settings remote change gives this machine that repo's config"
+  rm -rf "$_AS_ROOT"
+}
+
 run_profiles_tests() {
   printf "\n=== test_profiles.sh (profiles) ===\n"
   export GIT_AUTHOR_NAME=kitsync-test GIT_AUTHOR_EMAIL=t@kitsync.local
   export GIT_COMMITTER_NAME=kitsync-test GIT_COMMITTER_EMAIL=t@kitsync.local
   run_test_pr_switch_swaps_config
   run_test_pr_empty_profile_seeded
+  run_test_pr_settings_remote
 }

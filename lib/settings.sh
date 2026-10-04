@@ -47,15 +47,19 @@ _settings_remote() {
       ;;
   esac
 
-  if [[ -n "$new_url" ]]; then
-    if git -C "$CLAUDE_HOME" remote get-url origin &>/dev/null 2>&1; then
-      git -C "$CLAUDE_HOME" remote set-url origin "$new_url"
-      log_success "Remote updated: $new_url"
-    else
-      git -C "$CLAUDE_HOME" remote add origin "$new_url"
-      log_success "Remote added: $new_url"
-    fi
+  [[ -n "$new_url" ]] || return 0
+  if [[ "$current" == "(none)" ]]; then
+    git -C "$CLAUDE_HOME" remote add origin "$new_url"
+    log_success "Remote added: $new_url — run: claude-kitsync push"
+  else
+    # Never just repoint origin: that would merge two configs
+    _sync_switch_remote "$new_url" "$current" "$new_url" || return 1
   fi
+  # Keep the active profile pointing at its repository
+  local _active
+  _active="$(_profile_get_active)"
+  [[ -n "$_active" ]] && _profile_rewrite_config "$_active" "$_active" "$new_url"
+  return 0
 }
 
 # ---------------------------------------------------------------------------

@@ -116,6 +116,80 @@ _profile_delete_config() {
 # ---------------------------------------------------------------------------
 # _profile_switch <name> — switch active profile
 # ---------------------------------------------------------------------------
+# _sync_switch_remote <url> <from-label> <to-label> — make this machine sync
+# with another repository without mixing two configs:
+#   1. the current config is pushed to its own repository first
+#   2. every synced file is backed up as it is on disk
+#   3. a repository with content gives this machine its config; an empty one
+#      starts with this machine's config
+# Changing only the remote URL would merge one config into the other.
+# ---------------------------------------------------------------------------
+_sync_switch_remote() {
+  local url="$1" current="$2" name="$3"
+  # 1. The current profile's pending changes go to its own remote first
+  if _has_remote && git -C "$CLAUDE_HOME" rev-parse -q --verify HEAD >/dev/null; then
+    log_step "Saving ${current:-the current config} to its remote first..."
+    if ! sync_push "$(_sync_commit_msg "before switching to $name:")"; then
+      log_error "Could not push ${current:-the current config} — nothing was switched. Check: claude-kitsync status"
+      return 1
+    fi
+  fi
+  _sync_lock 30 || die "Another kitsync sync is running on this machine — try again in a moment."
+
+  # 2. Keep a copy of every synced file as it is on disk (local-only edits too)
+  local bak f
+  bak="$CLAUDE_HOME/.kitsync/backups/switch-$(date '+%Y%m%dT%H%M%S')"
+  while IFS= read -r -d '' f; do
+    [[ -f "$CLAUDE_HOME/$f" ]] || continue
+    mkdir -p "$(dirname "$bak/$f")"
+    cp -p "$CLAUDE_HOME/$f" "$bak/$f"
+  done < <(git -C "$CLAUDE_HOME" ls-files -z 2>/dev/null)
+
+  # 3. Point origin to the profile's remote; forget the old remote's branches
+  local old_url
+  old_url="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || true)"
+  if [[ -n "$old_url" ]]; then
+    git -C "$CLAUDE_HOME" remote set-url origin "$url"
+  else
+    git -C "$CLAUDE_HOME" remote add origin "$url"
+  fi
+  git -C "$CLAUDE_HOME" for-each-ref --format='%(refname)' refs/remotes/origin | \
+    while IFS= read -r f; do git -C "$CLAUDE_HOME" update-ref -d "$f"; done
+  local err
+  if ! err="$(_git_net fetch -q origin 2>&1)"; then
+    [[ -n "$old_url" ]] && git -C "$CLAUDE_HOME" remote set-url origin "$old_url"
+    git -C "$CLAUDE_HOME" fetch -q origin 2>/dev/null || true
+    log_error "Cannot reach $url — nothing was switched:"
+    printf '%s\n' "$err" | head -3 | sed 's/^/    /' >&2
+    return 1
+  fi
+
+  local branch
+  branch="$(git -C "$CLAUDE_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+  if git -C "$CLAUDE_HOME" rev-parse -q --verify "origin/$branch" >/dev/null; then
+    # 4a. The profile exists: this machine takes its config
+    git -C "$CLAUDE_HOME" reset -q --hard "origin/$branch"
+    git -C "$CLAUDE_HOME" branch -q --set-upstream-to="origin/$branch" "$branch" 2>/dev/null || true
+    _sync_prepare_repo
+    _sync_after_pull
+    log_success "Switched to $name: this machine now has its config."
+  else
+    # 4b. A new, empty profile starts from this machine's config
+    if ! err="$(git -C "$CLAUDE_HOME" push -q -u origin "HEAD:$branch" 2>&1)"; then
+      log_warn "Switched, but the first push to $name failed:"
+      printf '%s\n' "$err" | head -3 | sed 's/^/    /' >&2
+    fi
+    log_success "Switched to $name (it was empty: it starts with this machine's config)."
+  fi
+  log_info "Files as they were before: $bak"
+
+  # The new config's settings.json may lack the sync hooks
+  if declare -F hooks_install >/dev/null && [[ -z "$(_wrapper_rc_files 2>/dev/null)" ]]; then
+    hooks_install || true
+  fi
+}
+
+# ---------------------------------------------------------------------------
 _profile_switch() {
   local name="${1:-}"
   if [[ -z "$name" ]]; then
@@ -138,72 +212,8 @@ _profile_switch() {
     return 0
   fi
 
-  # A profile is a whole config: switching swaps this machine's synced files
-  # for the profile's. Changing only the remote would push one profile's
-  # files (personal agents…) into the other's repository.
-
-  # 1. The current profile's pending changes go to its own remote first
-  if _has_remote && git -C "$CLAUDE_HOME" rev-parse -q --verify HEAD >/dev/null; then
-    log_step "Saving profile '${current:-current}' to its remote first..."
-    if ! sync_push "$(_sync_commit_msg "before switching to $name:")"; then
-      log_error "Could not push '${current:-current}' — nothing was switched. Check: claude-kitsync status"
-      return 1
-    fi
-  fi
-  _sync_lock 30 || die "Another kitsync sync is running on this machine — try again in a moment."
-
-  # 2. Keep a copy of every synced file as it is on disk (local-only edits too)
-  local bak f
-  bak="$CLAUDE_HOME/.kitsync/backups/profile-${current:-none}-$(date '+%Y%m%dT%H%M%S')"
-  while IFS= read -r -d '' f; do
-    [[ -f "$CLAUDE_HOME/$f" ]] || continue
-    mkdir -p "$(dirname "$bak/$f")"
-    cp -p "$CLAUDE_HOME/$f" "$bak/$f"
-  done < <(git -C "$CLAUDE_HOME" ls-files -z 2>/dev/null)
-
-  # 3. Point origin to the profile's remote; forget the old remote's branches
-  local old_url
-  old_url="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || true)"
-  if [[ -n "$old_url" ]]; then
-    git -C "$CLAUDE_HOME" remote set-url origin "$url"
-  else
-    git -C "$CLAUDE_HOME" remote add origin "$url"
-  fi
-  git -C "$CLAUDE_HOME" for-each-ref --format='%(refname)' refs/remotes/origin | \
-    while IFS= read -r f; do git -C "$CLAUDE_HOME" update-ref -d "$f"; done
-  local err
-  if ! err="$(_git_net fetch -q origin 2>&1)"; then
-    [[ -n "$old_url" ]] && git -C "$CLAUDE_HOME" remote set-url origin "$old_url"
-    git -C "$CLAUDE_HOME" fetch -q origin 2>/dev/null || true
-    log_error "Cannot reach the '$name' remote — nothing was switched:"
-    printf '%s\n' "$err" | head -3 | sed 's/^/    /' >&2
-    return 1
-  fi
-
-  local branch
-  branch="$(git -C "$CLAUDE_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
-  if git -C "$CLAUDE_HOME" rev-parse -q --verify "origin/$branch" >/dev/null; then
-    # 4a. The profile exists: this machine takes its config
-    git -C "$CLAUDE_HOME" reset -q --hard "origin/$branch"
-    git -C "$CLAUDE_HOME" branch -q --set-upstream-to="origin/$branch" "$branch" 2>/dev/null || true
-    _sync_prepare_repo
-    _sync_after_pull
-    log_success "Switched to profile '$name': this machine now has its config."
-  else
-    # 4b. A new, empty profile starts from this machine's config
-    if ! err="$(git -C "$CLAUDE_HOME" push -q -u origin "HEAD:$branch" 2>&1)"; then
-      log_warn "Switched, but the first push to '$name' failed:"
-      printf '%s\n' "$err" | head -3 | sed 's/^/    /' >&2
-    fi
-    log_success "Switched to profile '$name' (it was empty: it starts with this machine's config)."
-  fi
+  _sync_switch_remote "$url" "profile '${current:-current}'" "profile '$name'" || return 1
   _profile_rewrite_config "$name" "" ""
-  log_info "Files as they were under '${current:-the previous profile}': $bak"
-
-  # The new profile's settings.json may lack the sync hooks
-  if declare -F hooks_install >/dev/null && [[ -z "$(_wrapper_rc_files 2>/dev/null)" ]]; then
-    hooks_install || true
-  fi
 }
 
 # ---------------------------------------------------------------------------
