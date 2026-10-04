@@ -66,6 +66,8 @@ _gitignore_migrate() {
     ".kitsync/local"
     ".kitsync/*.tmp.*"
     "skills/synced/"
+    # 1.2.5: never synced, even inside synced folders
+    "node_modules/" ".venv/" "venv/" "__pycache__/" "*.pyc" ".env" ".env.*" "!.env.example" "*.pem" "*.key" "*.p12" "*.pfx" "id_rsa*" "id_ed25519*" "*.log"
   )
   local missing=() r
   for r in "${rules[@]}"; do
@@ -84,6 +86,18 @@ _gitignore_migrate() {
   if [[ -n "$(git -C "$CLAUDE_HOME" ls-files -- skills/synced 2>/dev/null | head -1)" ]]; then
     git -C "$CLAUDE_HOME" rm -r --cached -q -- skills/synced 2>/dev/null || true
     log_info "Stopped syncing skills/synced/ (claude.ai account skills, managed by Claude Code)."
+  fi
+  # Dependencies, caches, secrets and logs committed before 1.2.5: untrack them
+  # (they stay on disk) — the same files would be refused from now on anyway
+  local leaked
+  leaked="$(git -C "$CLAUDE_HOME" ls-files -ci --exclude-standard -- \
+    '*node_modules/*' '*.venv/*' '*venv/*' '*__pycache__/*' '*.pyc' '*.env' '*.env.*' \
+    '*.pem' '*.key' '*.p12' '*.pfx' '*id_rsa*' '*id_ed25519*' '*.log' 2>/dev/null || true)"
+  if [[ -n "$leaked" ]]; then
+    printf '%s\n' "$leaked" | while IFS= read -r _f; do
+      git -C "$CLAUDE_HOME" rm --cached -q -- "$_f" 2>/dev/null || true
+    done
+    log_warn "Stopped syncing (kept on disk): $(printf '%s' "$leaked" | head -5 | tr '\n' ' ')$([[ $(grep -c . <<< "$leaked") -gt 5 ]] && echo "…")"
   fi
   if [[ -n "$tracked" ]]; then
     printf '%s\n' "$tracked" | while IFS= read -r _f; do

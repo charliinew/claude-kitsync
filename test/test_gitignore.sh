@@ -208,6 +208,44 @@ run_test_ac5_agents_dir_not_ignored() {
 # ---------------------------------------------------------------------------
 # Run all tests in this module
 # ---------------------------------------------------------------------------
+run_test_gi_never_inside_synced_dirs() {
+  local d f
+  d="$(mktemp -d)"
+  git -C "$d" init -q
+  cp "$_PROJECT_ROOT/templates/.gitignore.template" "$d/.gitignore"
+  for f in skills/s/node_modules/y/i.js skills/s/.env hooks/__pycache__/a.pyc scripts/t/.venv/bin/python \
+           hooks/key.pem skills/s/debug.log; do
+    git -C "$d" check-ignore -q "$f"
+    assert_zero "$?" "GI: $f never synced, even inside a synced folder"
+  done
+  for f in skills/s/.env.example skills/s/SKILL.md hooks/run.sh; do
+    git -C "$d" check-ignore -q "$f"
+    assert_nonzero "$?" "GI: $f still synced"
+  done
+  rm -rf "$d"
+}
+
+run_test_gi_migration_untracks_leaks() {
+  local d
+  d="$(mktemp -d)"
+  mkdir -p "$d/.claude/skills/s"
+  git -C "$d/.claude" init -q -b main
+  # Allowlist from an older version, and a .env committed with it
+  grep -v '^\.env\|^# Never synced\|node_modules/\|venv/\|__pycache__\|\.pyc$\|\.pem$\|\.key$\|\.p12$\|\.pfx$\|^id_\|\.log$' \
+    "$_PROJECT_ROOT/templates/.gitignore.template" | grep -v '^!\.env' > "$d/.claude/.gitignore"
+  echo "TOKEN=x" > "$d/.claude/skills/s/.env"
+  git -C "$d/.claude" add -A
+  git -C "$d/.claude" -c user.email=t@t -c user.name=t commit -qm old
+  HOME="$d" CLAUDE_HOME="$d/.claude" _L="$_PROJECT_ROOT/lib" bash -c '
+    for l in core paths profiles crypto sync; do source "$_L/$l.sh"; done
+    _gitignore_migrate' >/dev/null 2>&1
+  assert_contains "$(cat "$d/.claude/.gitignore")" "node_modules/" "GI: migration adds the never-sync rules"
+  assert_eq "" "$(git -C "$d/.claude" ls-files --cached -- skills/s/.env)" \
+    "GI: migration untracks an already committed .env"
+  assert_file_exists "$d/.claude/skills/s/.env" "GI: untracked .env kept on disk"
+  rm -rf "$d"
+}
+
 run_gitignore_tests() {
   printf "\n=== test_gitignore.sh (AC2, AC5) ===\n"
   run_test_ac2_gitignore_exists
@@ -221,4 +259,6 @@ run_gitignore_tests() {
   run_test_ac5_other_runtime_dirs_ignored
   run_test_ac5_settings_json_not_ignored
   run_test_ac5_agents_dir_not_ignored
+  run_test_gi_never_inside_synced_dirs
+  run_test_gi_migration_untracks_leaks
 }

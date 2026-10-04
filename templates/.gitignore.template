@@ -64,3 +64,20 @@ history.jsonl
 settings.local.json
 *.local.json
 .DS_Store
+
+# Never synced, even inside synced folders: dependencies, caches, secrets, logs
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*.log
