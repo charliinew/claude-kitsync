@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.10] — 2026-10-04
+
+### Fixed
+- **`restore` wrote backups to the wrong place**: anything other than `.zshrc`/`.bashrc` went to `~/<name>`, so a `settings.json` backup landed in `~/settings.json` and a `.gitignore` backup (from `init`) would overwrite `~/.gitignore` — often git's global excludes file. Each backup now goes back to where it came from (`~/.claude/settings.json`, `~/.claude/.gitignore`, `~/.bash_profile` too), and unknown files are never restored.
+- **Without a terminal, `restore` silently restored the newest backup**; it now requires the backup's name: `claude-kitsync restore <file>`.
+
+### Changed
+- `restore` backs up the current version before replacing it (a restore can be undone), writes in place (a symlinked file stays a symlink), and shows where each backup goes.
+
 ## [1.2.9] — 2026-10-04
 
 ### Fixed
