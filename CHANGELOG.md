@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.5] — 2026-10-04
+
+### Fixed
+- **The allowlist let dependencies, secrets and caches through inside synced folders**: a `node_modules/` from `bun install` in a skill, a `.env`, a `.pem` key, a Python `.venv/` or `__pycache__/`, logs. They are now never synced, even inside `skills/`, `hooks/`, `scripts/`… (`.env.example` still is). Existing setups get the rules automatically; such files already committed are untracked (kept on disk) with a warning.
+
 ## [1.2.4] — 2026-10-04
 
 ### Fixed
