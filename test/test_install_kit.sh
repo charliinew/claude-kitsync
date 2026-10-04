@@ -412,6 +412,52 @@ run_test_parse_skill_url_plain_url() {
 # ---------------------------------------------------------------------------
 # Run all tests in this module
 # ---------------------------------------------------------------------------
+# _ik_copy <home> <kit dir> <category> <conflict-all> — the real lib copy
+_ik_copy() {
+  HOME="$1" CLAUDE_HOME="$1/.claude" KITSYNC_NO_TTY=1 _P="$_PROJECT_ROOT/lib" bash -c '
+    for l in core paths install-kit; do source "$_P/$l.sh"; done
+    set +e
+    _KIT_CONFLICT_ALL="$2"
+    _copy_kit_dir "$0/$1" "$CLAUDE_HOME"' "$2" "$3" "$4" >/dev/null 2>&1
+}
+
+run_test_ik_real_copy() {
+  local r k h
+  r="$(mktemp -d)"; k="$r/kit"; h="$r/home"
+  mkdir -p "$k/hooks" "$k/skills/s/node_modules/x" "$h/.claude/hooks"
+  printf 'python3 /Users/alice/.claude/hooks/check.py\n' > "$k/hooks/run.sh"
+  echo "TOKEN=x" > "$k/skills/s/.env"
+  echo "dep" > "$k/skills/s/node_modules/x/i.js"
+  echo "# s" > "$k/skills/s/SKILL.md"
+  echo "mine" > "$h/.claude/hooks/run.sh"
+
+  _ik_copy "$h" "$k" hooks backup
+  assert_contains "$(cat "$h/.claude/hooks/run.sh")" "$h/.claude/hooks/check.py" \
+    "IK: the kit author's paths point at this machine"
+  assert_eq "0" "$(find "$h/.claude/hooks" -name '*.bak*' | grep -c .)" "IK: no backup left in a synced folder"
+  assert_eq "mine" "$(cat "$h"/.claude/.kitsync/backups/install-*/hooks/run.sh 2>/dev/null)" \
+    "IK: replaced file kept in .kitsync/backups"
+
+  _ik_copy "$h" "$k" skills ""
+  assert_file_exists "$h/.claude/skills/s/SKILL.md" "IK: skill copied"
+  assert_eq "no no" "$([[ -e "$h/.claude/skills/s/.env" ]] && echo yes || echo no) $([[ -e "$h/.claude/skills/s/node_modules" ]] && echo yes || echo no)" \
+    "IK: secrets and dependencies never copied from a kit"
+
+  echo "# kit version" > "$k/skills/s/SKILL.md"
+  echo "# my version" > "$h/.claude/skills/s/SKILL.md"
+  _ik_copy "$h" "$k" skills ""
+  assert_eq "# my version" "$(cat "$h/.claude/skills/s/SKILL.md")" "IK: without a terminal an existing file is kept"
+  rm -rf "$r"
+}
+
+run_test_ik_subpath_traversal() {
+  local out
+  out="$(_P="$_PROJECT_ROOT/lib" bash -c '
+    for l in core paths install-kit; do source "$_P/$l.sh"; done
+    _parse_skill_url "https://github.com/a/b/tree/main/../../../.ssh"' 2>&1)"
+  assert_contains "$out" "Invalid path" "IK: a skill URL cannot reach outside the cloned repository"
+}
+
 run_install_kit_tests() {
   printf "\n=== test_install_kit.sh (AC8) ===\n"
   run_test_ac8_new_agents_copied
@@ -430,4 +476,6 @@ run_install_kit_tests() {
   run_test_install_nonstandard_layout_standard_wins
   run_test_parse_skill_url_tree_url
   run_test_parse_skill_url_plain_url
+  run_test_ik_real_copy
+  run_test_ik_subpath_traversal
 }

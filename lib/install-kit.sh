@@ -100,7 +100,9 @@ _parse_skill_url() {
 
   if [[ "$url" =~ ^(https://github\.com/[^/]+/[^/]+)/tree/[^/]+/(.+)$ ]]; then
     _PARSED_REPO_URL="${BASH_REMATCH[1]}"
-    _PARSED_SUBPATH="${BASH_REMATCH[2]}"
+    _PARSED_SUBPATH="${BASH_REMATCH[2]%/}"
+    # The path must stay inside the cloned repository
+    [[ "/$_PARSED_SUBPATH/" == *"/../"* ]] && die "Invalid path in URL: $_PARSED_SUBPATH"
   else
     _PARSED_REPO_URL="$url"
     _PARSED_SUBPATH=""
@@ -161,6 +163,41 @@ _resolve_conflict() {
 
 # Global conflict-all preference (set during session)
 _KIT_CONFLICT_ALL=""
+# Where files replaced by a kit are kept (one folder per install, never synced)
+_KIT_BACKUP_DIR=""
+
+# _kit_skip_file <relative path> — never brought in from a kit: dependencies,
+# caches, secrets, logs, VCS data (the same things the allowlist never syncs)
+_kit_skip_file() {
+  case "/$1" in
+    */node_modules/*|*/.venv/*|*/venv/*|*/__pycache__/*|*/.git/*) return 0 ;;
+  esac
+  case "$(basename "$1")" in
+    .env.example) return 1 ;;
+    .env|.env.*|*.pyc|*.pem|*.key|*.p12|*.pfx|id_rsa*|id_ed25519*|*.log|.DS_Store) return 0 ;;
+  esac
+  return 1
+}
+
+# _kit_localize <file> — a kit's text files carry its author's paths
+# (/Users/alice/.claude/hooks/…) or path tokens: point them at this machine
+_kit_localize() {
+  local f="$1" pat
+  for pat in "${KITSYNC_PATH_FILTERED_FILES[@]}"; do
+    # shellcheck disable=SC2254  # pat is a glob on purpose
+    case "$(basename "$f")" in $pat)
+      local target tmp
+      target="$(printf '%s' "$CLAUDE_HOME" | sed 's|[&\\|]|\\&|g')"
+      tmp="$f.localize.$$"
+      paths_detokenize_stream < "$f" | \
+        sed -e "s|/Users/[^/\"' ]*/\\.claude|${target}|g" -e "s|/home/[^/\"' ]*/\\.claude|${target}|g" > "$tmp" \
+        && cat "$tmp" > "$f"
+      rm -f "$tmp"
+      return 0
+      ;;
+    esac
+  done
+}
 
 # ---------------------------------------------------------------------------
 # _copy_kit_item — copy a single file from kit tmpdir to $CLAUDE_HOME
@@ -180,6 +217,8 @@ _copy_kit_item() {
 
     if [[ -n "$_KIT_CONFLICT_ALL" ]]; then
       action="$_KIT_CONFLICT_ALL"
+    elif ! _has_tty; then
+      action="skip"   # nobody to ask: never replace a file of yours
     else
       action="$(_resolve_conflict "$dest")"
     fi
@@ -191,17 +230,23 @@ _copy_kit_item() {
         ;;
       overwrite)
         cp "$src" "$dest"
+        _kit_localize "$dest"
         log_success "Overwritten: $dest"
         ;;
       backup)
-        local backup_path="${dest}.bak.$(date '+%Y%m%d%H%M%S')"
-        cp "$dest" "$backup_path"
+        [[ -n "$_KIT_BACKUP_DIR" ]] || \
+          _KIT_BACKUP_DIR="$CLAUDE_HOME/.kitsync/backups/install-$(date '+%Y%m%dT%H%M%S')"
+        local backup_path="$_KIT_BACKUP_DIR/${dest#"$CLAUDE_HOME/"}"
+        mkdir -p "$(dirname "$backup_path")"
+        cp -p "$dest" "$backup_path"
         cp "$src" "$dest"
-        log_success "Backed up to $backup_path — then overwritten: $dest"
+        _kit_localize "$dest"
+        log_success "Overwritten: $dest  (previous version: $backup_path)"
         ;;
     esac
   else
     cp "$src" "$dest"
+    _kit_localize "$dest"
     log_success "Installed: $dest"
   fi
 }
@@ -234,6 +279,7 @@ _copy_kit_dir() {
       log_warn "Protected file skipped: $rel_path"
       continue
     fi
+    _kit_skip_file "$rel_path" && continue
 
     _copy_kit_item "$src_file" "$dest_file"
   done < <(find "$kit_dir" -type f -print0 2>/dev/null)
@@ -298,13 +344,17 @@ cmd_install() {
   trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
   log_step "Cloning kit from $clone_url..."
-  if ! git clone --depth 1 "$clone_url" "$tmp_dir" 2>/dev/null; then
-    die "Failed to clone $clone_url — check the URL and your network connection."
+  local _clone_err
+  if ! _clone_err="$(GIT_TERMINAL_PROMPT=0 git clone -q --depth 1 "$clone_url" "$tmp_dir" 2>&1)"; then
+    log_error "Failed to clone $clone_url:"
+    printf '%s\n' "$_clone_err" | head -3 | sed 's/^/    /' >&2
+    exit 1
   fi
   log_success "Kit cloned successfully."
 
   # Reset conflict-all preference for this install session
   _KIT_CONFLICT_ALL=""
+  _KIT_BACKUP_DIR=""
 
   # ---------------------------------------------------------------------------
   # Step 3: Install based on mode
