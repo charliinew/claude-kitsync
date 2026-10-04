@@ -63,7 +63,7 @@ Use one install method only: Homebrew (`brew upgrade claude-kitsync`) or the scr
 | `claude-kitsync status` | Show modified files and ahead/behind count |
 | `claude-kitsync log [-n <count>]` | Show sync history (default: last 15 commits) |
 | `claude-kitsync diff` | Show diff between local and remote before pushing |
-| `claude-kitsync publish` | Package and publish agents/skills as a kit to GitHub |
+| `claude-kitsync publish` | Publish agents/skills as a kit on GitHub — only what kitsync syncs, files holding secrets left out, your paths replaced by tokens, private unless you choose public, and only after showing you the list |
 | `claude-kitsync restore [backup]` | Put back a file kitsync backed up before editing it (shell rc, `settings.json`, `~/.claude/.gitignore`); the current version is backed up first |
 | `claude-kitsync setup-kit [--print]` | Wire the starter kit's hooks and status line into `settings.json` (`--print`: show the snippet instead) |
 | `claude-kitsync install [--skill] <url>` | Merge a public kit into `~/.claude` (no overwrite of local config); `--skill` installs skills only |
