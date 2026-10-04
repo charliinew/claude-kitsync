@@ -1,5 +1,21 @@
 #compdef claude-kitsync
 
+# Profile names known on this machine (.kitsync/local; older setups: .kitsync/config)
+_claude_kitsync_profiles() {
+  local d="${CLAUDE_HOME:-$HOME/.claude}/.kitsync"
+  local -a names
+  names=(${(f)"$(grep -h '^KITSYNC_PROFILES_[A-Z0-9_]*_URL=' "$d/local" "$d/config" 2>/dev/null \
+    | sed 's/^KITSYNC_PROFILES_//; s/_URL=.*//' | tr '[:upper:]' '[:lower:]' | sort -u)"})
+  _describe 'profile' names
+}
+
+# Backups `restore` can put back
+_claude_kitsync_backups() {
+  local -a backups
+  backups=(${CLAUDE_HOME:-$HOME/.claude}/.kitsync/backups/{,.}*.bak(N:t))
+  _describe 'backup' backups
+}
+
 _claude_kitsync() {
   local line state
 
@@ -12,65 +28,78 @@ _claude_kitsync() {
   case "$state" in
     cmds)
       _values 'command' \
-        'init[Set up ~/.claude as a git repo and install shell wrapper]' \
-        'push[Commit and push config changes to remote]' \
-        'pull[Pull latest config from remote]' \
-        'status[Show modified files and ahead/behind count]' \
-        'log[Show sync history]' \
-        'diff[Show diff between local and remote]' \
-        'publish[Package and publish a kit to GitHub]' \
-        'install[Merge a public kit into ~/.claude]' \
-        'profile[Manage sync profiles (work, perso...)]' \
-        'encrypt[Encrypt settings.json before push (AES-256)]' \
+        'init[Set up ~/.claude as a synced git repo]' \
+        'push[Commit and push config changes now]' \
+        'pull[Pull config from the remote, resolving conflicts file by file]' \
+        'status[What the next push sends, what is incoming]' \
+        'log[Sync history, with files and machine names]' \
+        'diff[Changes both ways, before syncing]' \
+        'publish[Publish agents/skills as a kit on GitHub]' \
+        'install[Merge a kit into ~/.claude]' \
+        'profile[Separate configs in separate repos (work, perso…)]' \
+        'encrypt[Encrypt settings.json before push]' \
         'settings[Change sync preferences]' \
-        'doctor[Run health checks on your setup]' \
-        'restore[Restore a rc file from a kitsync backup]' \
-        'upgrade[Update claude-kitsync to the latest version]' \
+        'doctor[Check that sync works]' \
+        'restore[Put back a file kitsync backed up]' \
+        'upgrade[Update claude-kitsync to the latest signed release]' \
         'setup-kit[Wire the starter kit hooks and status line into settings.json]' \
-        'uninstall[Remove claude-kitsync completely]'
+        'uninstall[Remove claude-kitsync (keeps ~/.claude)]'
       ;;
     args)
       case $line[1] in
         init)
           _arguments \
-            '--remote[Git remote URL]:url:' \
+            '--remote[Git remote URL]:url:'
           ;;
         push)
           _arguments \
             '(-m)-m[Commit message]:message:' \
-            '--auto[Non-interactive mode, suppress output]' \
-            '(-n --dry-run)'{-n,--dry-run}'[Preview what would be committed without committing]' \
-            '--allow-secret[Push this file even if it looks like it holds a secret]:file:_files' \
+            '(-n --dry-run)'{-n,--dry-run}'[Show what would be committed, change nothing]' \
+            '--allow-secret[Push this file even if it looks like it holds a secret]:file:_files'
           ;;
         pull)
           _arguments \
-            '--force[Pull even if working tree is dirty]' \
+            '--force[Take the remote for every conflicting file (local versions backed up)]'
           ;;
         log)
           _arguments \
-            '-n[Number of commits to show]:count:' \
+            '-n[Number of syncs to show]:count:'
+          ;;
+        install)
+          _arguments \
+            '--skill[Install skills only]' \
+            ':kit url:_urls'
+          ;;
+        profile)
+          _arguments \
+            '1:subcommand:(list add switch remove)' \
+            '2:profile:_claude_kitsync_profiles'
+          ;;
+        encrypt)
+          _arguments \
+            '1:subcommand:(enable disable rotate status)'
+          ;;
+        restore)
+          _arguments \
+            '1:backup:_claude_kitsync_backups'
           ;;
         upgrade)
           _arguments \
             '--dev[Upgrade to the latest commit on main]' \
             '--force[Discard local changes in the install directory]' \
-            '--no-verify[Skip the release signature check]' \
+            '--no-verify[Skip the release signature check]'
           ;;
         setup-kit)
           _arguments \
-            '--print[Show the settings.json snippet instead of editing it]' \
+            '--print[Show the settings.json snippet instead of editing it]'
           ;;
         uninstall)
           _arguments \
-            '(-y --yes)'{-y,--yes}'[Do not ask for confirmation]' \
-          ;;
-        install)
-          _arguments \
-            ':kit url:_urls' \
+            '(-y --yes)'{-y,--yes}'[Do not ask for confirmation]'
           ;;
       esac
       ;;
   esac
 }
 
-_claude_kitsync
+_claude_kitsync "$@"

@@ -46,10 +46,35 @@ run_test_co_status_and_diff() {
   rm -rf "$_AS_ROOT"
 }
 
+# _cp <words…> — bash completion candidates for a command line ("" = new word)
+_cp() {
+  HOME="$_CP_HOME" bash -c '
+    source "$0"
+    COMP_WORDS=("$@"); COMP_CWORD=$(( ${#COMP_WORDS[@]} - 1 ))
+    _claude_kitsync; echo "${COMPREPLY[*]}"' "$_PROJECT_ROOT/completions/claude-kitsync.bash" "$@"
+}
+
+run_test_co_completion() {
+  _CP_HOME="$(mktemp -d)"
+  mkdir -p "$_CP_HOME/.claude/.kitsync/backups"
+  printf 'KITSYNC_PROFILES_WORK_URL=x\nKITSYNC_PROFILES_PERSO_URL=y\n' > "$_CP_HOME/.claude/.kitsync/local"
+  touch "$_CP_HOME/.claude/.kitsync/backups/.zshrc.20260101T000000.bak"
+  assert_eq "switch" "$(_cp claude-kitsync profile sw)" "CO: completion knows profile subcommands"
+  assert_eq "perso work" "$(_cp claude-kitsync profile switch '')" "CO: completion offers this machine's profiles"
+  assert_contains "$(_cp claude-kitsync encrypt '')" "rotate" "CO: completion knows encrypt subcommands"
+  assert_eq ".zshrc.20260101T000000.bak" "$(_cp claude-kitsync restore '')" "CO: completion offers backups, hidden ones included"
+  if command -v zsh &>/dev/null; then
+    zsh -n "$_PROJECT_ROOT/completions/_claude-kitsync"
+    assert_zero "$?" "CO: zsh completion parses"
+  fi
+  rm -rf "$_CP_HOME"
+}
+
 run_consult_tests() {
   printf "\n=== test_consult.sh (status / log / diff) ===\n"
   export GIT_AUTHOR_NAME=kitsync-test GIT_AUTHOR_EMAIL=t@kitsync.local
   export GIT_COMMITTER_NAME=kitsync-test GIT_COMMITTER_EMAIL=t@kitsync.local
   run_test_co_log
   run_test_co_status_and_diff
+  run_test_co_completion
 }
