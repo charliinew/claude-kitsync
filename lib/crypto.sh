@@ -78,7 +78,8 @@ _crypto_mismatch_marker() {
 
 # _crypto_warn_key — settings stay unsynced until the right key is copied
 _crypto_warn_key() {
-  local msg="settings.json is encrypted with a key this machine doesn't have (rotated or set up on another machine) — it is not synced until you copy $(_crypto_key_path) from a machine that has it."
+  local msg
+  msg="settings.json is encrypted with a key this machine doesn't have (rotated or set up on another machine) — it is not synced until you copy $(_crypto_key_path) from a machine that has it."
   log_warn "$msg"
   declare -F _sync_warn_next_launch >/dev/null && _sync_warn_next_launch "$msg"
   touch "$(_crypto_mismatch_marker)" 2>/dev/null || true
@@ -366,7 +367,8 @@ cmd_encrypt() {
         return 1
       fi
       local key_file; key_file="$(_crypto_key_path)"
-      local backup="${key_file}.bak.$(date '+%Y%m%dT%H%M%S')"
+      local backup
+      backup="${key_file}.bak.$(date '+%Y%m%dT%H%M%S')"
       [[ -f "$key_file" ]] && cp "$key_file" "$backup" && log_info "Old key backed up: $backup"
 
       local openssl_bin; openssl_bin="$(_crypto_openssl)" || { log_error "openssl not found."; return 1; }

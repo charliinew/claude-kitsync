@@ -6,7 +6,6 @@ set -euo pipefail
 # _find_template — locate the .gitignore.template relative to this script
 # ---------------------------------------------------------------------------
 _find_template() {
-  local script_dir
   # Resolve the directory containing the currently sourced/executed script
   # When sourced from bin/kitsync, KITSYNC_ROOT is set; fall back to relative paths.
   if [[ -n "${KITSYNC_ROOT:-}" ]]; then
@@ -413,7 +412,6 @@ _prompt_sync_items() {
 # ---------------------------------------------------------------------------
 _prompt_sync_preferences() {
   printf "\n"
-  local cfg="$CLAUDE_HOME/.kitsync/config"
 
   # Re-run: offer to keep what is there (without a terminal, keep it)
   if [[ -n "$(_cfg_get KITSYNC_PULL_MODE)" ]]; then

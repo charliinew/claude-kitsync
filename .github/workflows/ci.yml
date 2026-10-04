@@ -6,6 +6,14 @@ on:
   pull_request:
     branches: [main]
 
+# Read-only token: CI never writes to the repository
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Test (${{ matrix.os }})
@@ -16,13 +24,26 @@ jobs:
         os: [macos-latest, ubuntu-latest]
 
     steps:
-      - uses: actions/checkout@v7
+      # Actions pinned to a commit: a moved tag cannot change what runs here
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: ShellCheck
-        uses: ludeeus/action-shellcheck@2.0.0
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
         with:
-          severity: error
+          severity: warning
           ignore_paths: test kit templates
+
+      # macOS runs the stock /bin/bash 3.2, the shell most Mac users have
+      - name: Shell versions
+        run: bash --version | head -1
+
+      - name: Syntax check (bash, and zsh for the shell wrapper)
+        run: |
+          for f in bin/claude-kitsync lib/*.sh install.sh; do bash -n "$f"; done
+          if command -v zsh >/dev/null; then
+            bash -c 'source lib/core.sh; source lib/wrapper.sh; generate_wrapper' > "$RUNNER_TEMP/wrapper.sh"
+            zsh -n "$RUNNER_TEMP/wrapper.sh"
+          fi
 
       - name: Run test suite
         run: bash test/run_tests.sh

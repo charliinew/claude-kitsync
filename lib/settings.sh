@@ -14,9 +14,7 @@ _settings_remote() {
 
   local opts=()
   local actions=()
-  local has_gh=false
   if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
-    has_gh=true
     opts+=("Create a new GitHub repo")
     opts+=("Connect to an existing GitHub repo")
     actions+=("new") actions+=("connect")
