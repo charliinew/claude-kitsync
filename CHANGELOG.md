@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.6] — 2026-10-04
+
+### Fixed
+- **`log -n <count>` ignored the count** and always showed 15 syncs.
+- **`status` never checked the remote**, so incoming changes were invisible, and it called a tree with unpushed work "clean".
+- **`status` and `diff` ignored what the next push sends** (changes not committed yet, which is the usual case since pushes happen at the end of a session): `diff` said "nothing to diff".
+- `diff` without a terminal dumped the full diff; it now stops after the summary.
+
+### Changed
+- **`status` is a sync dashboard**: what the next push sends (the same preview as `push --dry-run`), what it would leave out, what stays local (categories this machine doesn't sync), unpushed commits, incoming commits and files (after a 10 s fetch), pending notices.
+- **`log` lists the files of each sync**, and sync commits now name the machine that sent them, e.g. `kitsync: auto-push 2026-10-04 12:59 (work-laptop)`. The name is the short hostname, or `KITSYNC_MACHINE_NAME` in `.kitsync/local`.
+- `diff`'s outgoing view includes changes not committed yet.
+
 ## [1.2.5] — 2026-10-04
 
 ### Fixed
