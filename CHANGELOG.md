@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.9] — 2026-10-04
+
+### Fixed
+- **`settings` → Remote & Repository only repointed `origin`**, so connecting to an existing repository merged two configs, exactly like the old profile switch. It now goes through the same switch: the current config is pushed to its repository, synced files are backed up, then this machine takes the new repository's config (or moves its config there if the repository is empty). The active profile follows the new URL.
+
 ## [1.2.8] — 2026-10-04
 
 ### Fixed
