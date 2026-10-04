@@ -742,9 +742,12 @@ _sync_stage() {
   fi
 }
 
-# _sync_dry_run — what push would commit, without changing anything
-_sync_dry_run() {
-  log_step "Dry run — showing what would be committed"; printf "\n" >&2
+# _sync_preview — what push would commit right now, without changing anything:
+# the real staging on a throwaway index; derived files it writes
+# (settings.json.enc, settings.template.json) are put back byte for byte.
+# Sets _SYNC_PREVIEW ("<status>\t<path>" lines) and _SYNC_LEFT_OUT.
+_SYNC_PREVIEW=""
+_sync_preview() {
   local gd idx bak f
   gd="$(git -C "$CLAUDE_HOME" rev-parse --absolute-git-dir)"
   idx="$(mktemp)"; bak="$(mktemp -d)"
@@ -756,27 +759,9 @@ _sync_dry_run() {
   export GIT_INDEX_FILE="$idx"
   _sync_stage
   _sync_unstage_unsafe dry
-  if git -C "$CLAUDE_HOME" diff --cached --quiet 2>/dev/null; then
-    log_info "Nothing to commit — working tree clean for synced files."
-  else
-    git -C "$CLAUDE_HOME" diff --cached --name-status 2>/dev/null | \
-      while IFS=$'\t' read -r _st _file; do
-        case "$_st" in
-          M) log_info "  modified:  $_file" ;;
-          A) log_info "  new file:  $_file" ;;
-          D) log_info "  deleted:   $_file" ;;
-          *) log_info "  $_st         $_file" ;;
-        esac
-      done
-  fi
+  _SYNC_PREVIEW="$(git -C "$CLAUDE_HOME" diff --cached --name-status 2>/dev/null || true)"
   unset GIT_INDEX_FILE
-  if [[ -n "$_SYNC_LEFT_OUT" ]]; then
-    printf "\n" >&2
-    log_warn "Would be left out:"
-    printf '%s' "$_SYNC_LEFT_OUT" | while IFS= read -r f; do [[ -n "$f" ]] && log_warn "  $f"; done
-  fi
 
-  # Put derived files back exactly as they were
   for f in settings.json.enc settings.template.json; do
     if [[ -f "$bak/$f" ]]; then
       cp -p "$bak/$f" "$CLAUDE_HOME/$f"
@@ -786,13 +771,57 @@ _sync_dry_run() {
   done
   rm -f "$idx" "$bak/settings.json.enc" "$bak/settings.template.json"
   rmdir "$bak" 2>/dev/null || true
+}
 
+# _sync_print_preview [indent] — _SYNC_PREVIEW as "modified: path" lines
+_sync_print_preview() {
+  local pad="${1:-  }" st file
+  while IFS=$'\t' read -r st file; do
+    [[ -n "$st" ]] || continue
+    case "$st" in
+      M) printf '%smodified:  %s\n' "$pad" "$file" ;;
+      A) printf '%snew file:  %s\n' "$pad" "$file" ;;
+      D) printf '%sdeleted:   %s\n' "$pad" "$file" ;;
+      *) printf '%s%-10s %s\n' "$pad" "$st" "$file" ;;
+    esac
+  done <<< "$_SYNC_PREVIEW" >&2
+}
+
+# _sync_dry_run — what push would commit, without changing anything
+_sync_dry_run() {
+  log_step "Dry run — showing what would be committed"; printf "\n" >&2
+  _sync_preview
+  if [[ -z "$_SYNC_PREVIEW" ]]; then
+    log_info "Nothing to commit — working tree clean for synced files."
+  else
+    _sync_print_preview "[kitsync]    "
+  fi
+  if [[ -n "$_SYNC_LEFT_OUT" ]]; then
+    printf "\n" >&2
+    log_warn "Would be left out:"
+    printf '%s' "$_SYNC_LEFT_OUT" | while IFS= read -r f; do [[ -n "$f" ]] && log_warn "  $f"; done
+  fi
   printf "\n" >&2
   local url profile
   url="$(git -C "$CLAUDE_HOME" remote get-url origin 2>/dev/null || echo 'no remote')"
   profile="$(_profile_get_active 2>/dev/null || true)"
   log_info "Would push to:  $url${profile:+  (profile: $profile)}"
   printf "\n"
+}
+
+# _sync_commit_msg <kind> — default commit message, with the machine's name
+# so `log` tells which machine sent what
+_sync_commit_msg() {
+  local name
+  name="$(_cfg_get KITSYNC_MACHINE_NAME)"
+  [[ -n "$name" ]] || name="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)"
+  printf 'kitsync: %s %s (%s)' "$1" "$(date '+%Y-%m-%d %H:%M')" "$name"
+}
+
+# _sync_fetch_quiet — refresh origin/<branch> for a read-only command; 1 if unreachable
+_sync_fetch_quiet() {
+  _has_remote || return 1
+  KITSYNC_NET_TIMEOUT="${KITSYNC_TIMEOUT:-10}" _git_net fetch -q origin &>/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -812,7 +841,7 @@ sync_push() {
       *)            commit_msg="$1"; shift ;;
     esac
   done
-  commit_msg="${commit_msg:-kitsync: sync $(date '+%Y-%m-%d %H:%M')}"
+  [[ -n "$commit_msg" ]] || commit_msg="$(_sync_commit_msg sync)"
 
   # In auto mode suppress info/step/success — only warnings and errors remain
   _plog_step()    { [[ "$_auto" == false ]] && log_step "$@" || true; }
@@ -922,21 +951,32 @@ sync_push() {
 # ---------------------------------------------------------------------------
 sync_log() {
   require_git_repo
-  local count="${1:-15}"
-  [[ "$count" =~ ^[0-9]+$ ]] || count=15
+  local count=15
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -n|--count) count="${2:-}"; shift 2 || shift ;;
+      -n*)        count="${1#-n}"; shift ;;
+      *)          count="$1"; shift ;;
+    esac
+  done
+  [[ "$count" =~ ^[0-9]+$ ]] && (( count > 0 )) || die "Usage: claude-kitsync log [-n <count>]"
 
-  printf "\n"
+  printf "\n" >&2
   log_info "Sync history — $CLAUDE_HOME"; printf "\n" >&2
 
-  if ! git -C "$CLAUDE_HOME" log -1 --oneline &>/dev/null 2>&1; then
+  if ! git -C "$CLAUDE_HOME" log -1 --oneline &>/dev/null; then
     log_warn "No commits yet."
     return 0
   fi
 
-  git -C "$CLAUDE_HOME" log -n "$count" \
+  # Each sync with the files it carried (5 at most)
+  git -C "$CLAUDE_HOME" --no-pager log -n "$count" --color=always \
     --pretty=format:"%C(yellow)%h%Creset  %C(cyan)%ad%Creset  %s" \
-    --date=format:'%Y-%m-%d %H:%M'
-
+    --date=format:'%Y-%m-%d %H:%M' --name-status 2>/dev/null | awk '
+      /^\x1b|^[0-9a-f]+  / { if (n > 5) printf "      … %d more\n", n - 5; n = 0; print; next }
+      /^$/ { next }
+      { n++; if (n <= 5) printf "      %s\n", $0 }
+      END { if (n > 5) printf "      … %d more\n", n - 5 }'
   printf "\n\n"
 }
 
@@ -974,13 +1014,20 @@ sync_diff() {
   printf "\n"
   log_info "Diff — $CLAUDE_HOME  (branch: $_branch)"; printf "\n" >&2
 
-  if [[ "$_ahead" -eq 0 ]] && [[ "$_behind" -eq 0 ]]; then
+  _sync_preview
+  if [[ "$_ahead" -eq 0 ]] && [[ "$_behind" -eq 0 ]] && [[ -z "$_SYNC_PREVIEW" ]]; then
     log_success "Up to date with remote — nothing to diff."
     printf "\n"
     return 0
   fi
 
   printf "  %s ahead · %s behind\n\n" "$_ahead" "$_behind"
+
+  if [[ -n "$_SYNC_PREVIEW" ]]; then
+    printf "%s  ↑ Not committed yet (sent by the next push):%s\n" "$_CLR_YELLOW" "$_CLR_RESET"
+    _sync_print_preview "    "
+    printf "\n"
+  fi
 
   if [[ "$_ahead" -gt 0 ]]; then
     local _s; [[ "$_ahead" -gt 1 ]] && _s="s" || _s=""
@@ -1011,15 +1058,17 @@ sync_diff() {
     fi
   fi
 
+  # The full diff is an interactive extra: never dumped into a pipe or a log
+  _has_tty || return 0
   local choice
   choice=$(_select_menu "View full diff?" \
     "Incoming diff  (remote → local)" \
-    "Outgoing diff  (local → remote)" \
+    "Outgoing diff  (local → remote, committed and not yet committed)" \
     "Exit")
 
   case "$choice" in
-    1) git -C "$CLAUDE_HOME" diff "HEAD...$_remote" 2>/dev/null | "${PAGER:-less}" -R ;;
-    2) git -C "$CLAUDE_HOME" diff "$_remote...HEAD" 2>/dev/null | "${PAGER:-less}" -R ;;
+    1) git -C "$CLAUDE_HOME" diff --color=always "HEAD...$_remote" 2>/dev/null | "${PAGER:-less}" -R ;;
+    2) git -C "$CLAUDE_HOME" diff --color=always "$_remote" 2>/dev/null | "${PAGER:-less}" -R ;;
     3) true ;;
   esac
 }
@@ -1029,43 +1078,59 @@ sync_diff() {
 # ---------------------------------------------------------------------------
 sync_status() {
   require_git_repo
-
-  local branch
+  local branch profile
   branch="$(git -C "$CLAUDE_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")"
+  profile="$(_profile_get_active 2>/dev/null || true)"
 
-  printf "\n"
-  log_info "Repository: $CLAUDE_HOME"
-  log_info "Branch:     $branch"
-  local _status_profile
-  _status_profile="$(_profile_get_active 2>/dev/null || true)"
-  if [[ -n "$_status_profile" ]]; then
-    log_info "Profile:    $_status_profile"
+  printf "\n" >&2
+  log_info "Repository: $CLAUDE_HOME  (branch: $branch${profile:+, profile: $profile})"
+
+  local reachable=true
+  _sync_fetch_quiet || reachable=false
+  printf "\n" >&2
+
+  # Notices left by background syncs
+  local f="$CLAUDE_HOME/.kitsync"
+  [[ -f "$f/conflict_pending" ]] && \
+    log_warn "Sync conflict pending: $(grep '^files:' "$f/conflict_pending" | cut -d: -f2-) — run: claude-kitsync pull"
+  [[ -f "$f/sync-warning" ]] && log_warn "$(cat "$f/sync-warning")"
+
+  # What the next push sends
+  _sync_preview
+  if [[ -n "$_SYNC_PREVIEW" ]]; then
+    log_info "Next push sends (at the end of your session, or now: claude-kitsync push):"
+    _sync_print_preview "    "
   fi
-  printf "\n"
-
-  local status_output
-  status_output="$(git -C "$CLAUDE_HOME" status --short 2>/dev/null)"
-
-  if [[ -z "$status_output" ]]; then
-    log_success "Working tree clean — nothing to sync."
-  else
-    printf "%s\n" "$status_output"
+  if [[ -n "$_SYNC_LEFT_OUT" ]]; then
+    log_warn "Left out of the next push:"
+    printf '%s' "$_SYNC_LEFT_OUT" | sed 's/^/    /' >&2
   fi
 
-  printf "\n"
-
-  # Show last commit info
-  if git -C "$CLAUDE_HOME" log -1 --oneline &>/dev/null 2>&1; then
-    log_info "Last commit: $(git -C "$CLAUDE_HOME" log -1 --oneline 2>/dev/null)"
+  # Changed here but never sent (categories this machine doesn't push or pull)
+  local staged local_only
+  staged="$(cut -f2- <<< "$_SYNC_PREVIEW")"
+  local_only="$(git -C "$CLAUDE_HOME" diff --name-only HEAD 2>/dev/null | grep -vxF -f <(printf '%s\n' "$staged" ; printf '%s' "$_SYNC_LEFT_OUT" | sed 's/ (.*//') || true)"
+  if [[ -n "$local_only" ]]; then
+    log_info "Local only (categories not synced from this machine):"
+    printf '%s\n' "$local_only" | sed 's/^/    /' >&2
   fi
 
-  # Show ahead/behind if remote exists
-  if _has_remote; then
-    local ahead behind
+  # Commits both ways
+  local ahead=0 behind=0
+  if git -C "$CLAUDE_HOME" rev-parse --abbrev-ref '@{u}' &>/dev/null; then
     ahead="$(git -C "$CLAUDE_HOME" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
     behind="$(git -C "$CLAUDE_HOME" rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)"
-    if [[ "$ahead" -gt 0 ]] || [[ "$behind" -gt 0 ]]; then
-      log_info "Remote delta: $ahead ahead, $behind behind"
-    fi
   fi
+  (( ahead > 0 )) && log_info "$ahead commit(s) not pushed yet"
+  if (( behind > 0 )); then
+    log_info "$behind commit(s) to pull (next session, or now: claude-kitsync pull):"
+    git -C "$CLAUDE_HOME" --no-pager diff --stat=70 'HEAD...@{u}' 2>/dev/null | sed 's/^/    /' >&2
+  fi
+  [[ "$reachable" == true ]] || log_warn "Remote unreachable — incoming changes not checked."
+
+  if [[ -z "$_SYNC_PREVIEW$_SYNC_LEFT_OUT" ]] && (( ahead == 0 && behind == 0 )) && \
+     [[ "$reachable" == true && ! -f "$f/conflict_pending" ]]; then
+    log_success "In sync — nothing to push or pull."
+  fi
+  printf "\n" >&2
 }

@@ -106,7 +106,7 @@ _has_tty() {
 #   local   never synced — this machine's choices (modes, categories, timer,
 #           upgrade channel); a work laptop can sync less than a personal one
 # ---------------------------------------------------------------------------
-KITSYNC_LOCAL_KEYS="KITSYNC_PULL_MODE KITSYNC_PUSH_MODE KITSYNC_PUSH_TIMER KITSYNC_PUSH_ITEMS KITSYNC_PULL_ITEMS KITSYNC_UPGRADE_CHANNEL"
+KITSYNC_LOCAL_KEYS="KITSYNC_PULL_MODE KITSYNC_PUSH_MODE KITSYNC_PUSH_TIMER KITSYNC_PUSH_ITEMS KITSYNC_PULL_ITEMS KITSYNC_UPGRADE_CHANNEL KITSYNC_MACHINE_NAME"
 
 _is_local_key() { [[ " $KITSYNC_LOCAL_KEYS " == *" $1 "* ]]; }
 

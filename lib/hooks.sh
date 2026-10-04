@@ -214,7 +214,7 @@ cmd_hook() {
   timer="$(_hook_cfg KITSYNC_PUSH_TIMER)"
   [[ "$timer" =~ ^[0-9]+$ ]] && (( timer > 0 )) || timer=15
   local msg
-  msg="kitsync: auto-push $(date '+%Y-%m-%d %H:%M')"
+  msg="$(_sync_commit_msg auto-push)"
 
   case "$ev" in
     session-start)

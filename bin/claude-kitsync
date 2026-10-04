@@ -266,7 +266,7 @@ main() {
       ;;
     log)
       shift
-      sync_log "${1:-15}"
+      sync_log "$@"
       ;;
     diff)
       sync_diff
